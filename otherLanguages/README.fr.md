@@ -32,7 +32,7 @@
 
 AgentBehaviorBench (ABB) est un benchmark destiné à évaluer des Agents IA sur des tâches de bout en bout qui exigent d'appeler un Agent cible, de collecter ses sorties et sa trace d'exécution, puis de juger s'il a correctement terminé le workflow demandé.
 
-À partir d'un Agent enregistré et d'un Case de benchmark, AgentBehaviorBench (ABB) exécute l'Agent au moyen d'un harness hôte de confiance. Le harness peut lancer des Agents propres à un framework ou des Agents conteneurisés, router le trafic modèle via un Model Gateway qui protège les identifiants, enregistrer chaque input SDK et chaque response de l'Agent sous forme d'événements JSONL append-only, puis soumettre l'exécution terminée au DefuzeX Judge.
+À partir d'un Agent enregistré et d'un Case de benchmark, AgentBehaviorBench (ABB) exécute l'Agent au moyen d'un harness hôte de confiance. Le harness peut lancer des Agents propres à un framework ou des Agents conteneurisés, router le trafic modèle via un Model Interceptor qui protège les identifiants, enregistrer chaque input SDK et chaque response de l'Agent sous forme d'événements JSONL append-only, puis soumettre l'exécution terminée au DefuzeX Judge.
 
 AgentBehaviorBench (ABB) est conçu pour rendre l'évaluation des Agents reproductible. Les Agents sont déclarés dans un registry, adaptés via des framework adapters tels que LangGraph, certifiés de `adapting` à `ready`, puis inclus dans les exécutions benchmark par défaut uniquement après une certification réussie.
 
@@ -54,7 +54,7 @@ Le dépôt contient :
 - `agentbench/adapter` : contrat d'adapter indépendant du framework et support LangGraph.
 - `agentbench/runtime` : intégration des runtimes local et Docker.
 - `resources/agents` : fixtures d'Agents de benchmark reproductibles.
-- `services/model-gateway` : proxy de confiance pour l'accès aux model providers pendant les exécutions Docker.
+- `services/model-interceptor` : intercepteur transparent pour l'accès aux model providers pendant les exécutions Docker.
 
 ![AgentBehaviorBench (ABB) framework](../figures/framework.png)
 
@@ -136,7 +136,7 @@ Pour plus d'instructions destinées aux Agents, commencez par [AGENTS.md](../AGE
 
 Si vous voulez ajouter votre propre Agent au benchmark, demandez à un agent de lire [docs/How To Add Agent.md](../docs/How%20To%20Add%20Agent.md) et de suivre le flux d'onboarding qui y est documenté.
 
-AgentBehaviorBench (ABB) fournit les éléments nécessaires pour transformer un projet d'Agent externe en cible de benchmark répétable : discovery fondée sur le registry, framework adapters, support du Docker runtime, routage des identifiants modèle via le Model Gateway, result artifacts append-only, visualisation locale des résultats et certification de `adapting` à `ready`. Cela vous donne une manière cohérente de comparer des Agents sur les mêmes DefuzeX Cases tout en gardant le runtime behavior, les outputs et les judgment evidence inspectables.
+AgentBehaviorBench (ABB) fournit les éléments nécessaires pour transformer un projet d'Agent externe en cible de benchmark répétable : discovery fondée sur le registry, framework adapters, support du Docker runtime, routage des identifiants modèle via le Model Interceptor, result artifacts append-only, visualisation locale des résultats et certification de `adapting` à `ready`. Cela vous donne une manière cohérente de comparer des Agents sur les mêmes DefuzeX Cases tout en gardant le runtime behavior, les outputs et les judgment evidence inspectables.
 
 ## Citation et licence
 

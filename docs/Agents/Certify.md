@@ -31,7 +31,8 @@ status = "ready"
 
 - Docker builds and starts.
 - The worker receives SDK Inputs.
-- The model Gateway is reachable.
+- For an Agent with required model interception, the Model Interceptor captures
+  a complete request/response pair.
 - The Agent returns JSON-compatible output.
 - Every requested Case completed.
 - No `AgentInvocationError` or `DockerSessionError` occurred.
@@ -75,6 +76,6 @@ When diagnosing, inspect the first boundary that failed:
 | SDK configuration | requirement file, `DEFUZEX_API_KEY`, provider selection |
 | Starting Agent | `agent.toml`, Dockerfile, package install, runtime paths |
 | Generating Case | requirement content, service response, sensitive-data rejection |
-| Running Agent inputs | worker stdout/stderr, input mapping, model Gateway, timeout |
+| Running Agent inputs | worker stdout/stderr, input mapping, Model Interceptor Trace, timeout |
 | Judge issue with completed Cases | public `output`, requirement criteria, Agent behavior |
 | Registry update | target `status` field and concurrent edits |

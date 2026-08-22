@@ -32,7 +32,7 @@
 
 AgentBehaviorBench (ABB) 是一个用于评估 AI Agent 的基准测试工具，面向需要调用目标 Agent、收集其输出和执行轨迹，并判断其是否正确完成指定工作流的端到端任务。
 
-给定一个已注册的 Agent 和一个 benchmark Case，AgentBehaviorBench (ABB) 会通过受信任的宿主 harness 运行该 Agent。该 harness 可以启动特定框架或容器化的 Agent，通过凭据安全的 Model Gateway 路由模型流量，将每个 SDK input 和 Agent response 记录为只追加的 JSONL 事件，并把完成的运行提交给 DefuzeX Judge。
+给定一个已注册的 Agent 和一个 benchmark Case，AgentBehaviorBench (ABB) 会通过受信任的宿主 harness 运行该 Agent。该 harness 可以启动特定框架或容器化的 Agent，通过凭据安全的 Model Interceptor 路由模型流量，将每个 SDK input 和 Agent response 记录为只追加的 JSONL 事件，并把完成的运行提交给 DefuzeX Judge。
 
 AgentBehaviorBench (ABB) 旨在让 Agent 评估具备可复现性。Agent 在 registry 中声明，通过 LangGraph 等框架 adapter 接入，从 `adapting` 认证到 `ready`，并且只有在认证成功后才会进入默认 benchmark 运行。
 
@@ -54,7 +54,7 @@ registry.toml
 - `agentbench/adapter`：框架无关的 adapter contract 和 LangGraph 支持。
 - `agentbench/runtime`：本地和 Docker runtime 集成。
 - `resources/agents`：可复现的 benchmark Agent fixture。
-- `services/model-gateway`：Docker 运行中用于模型 provider 访问的受信任代理。
+- `services/model-interceptor`：Docker 运行中用于模型 provider 访问的透明拦截服务。
 
 ![AgentBehaviorBench (ABB) framework](../figures/framework.png)
 
@@ -136,7 +136,7 @@ python -m pytest
 
 如果你想把自己的 Agent 添加到 benchmark，请让 agent 阅读 [docs/How To Add Agent.md](../docs/How%20To%20Add%20Agent.md)，并按照其中记录的 onboarding flow 操作。
 
-AgentBehaviorBench (ABB) 提供了把外部 Agent project 转换为可重复 benchmark target 所需的组件：基于 registry 的 discovery、framework adapters、Docker runtime support、通过 Model Gateway 路由模型凭据、只追加 result artifacts、本地 result viewing，以及从 `adapting` 到 `ready` 的 certification。这让你可以用同一组 DefuzeX Cases 一致地比较不同 Agent，同时保持 runtime behavior、outputs 和 judgment evidence 可检查。
+AgentBehaviorBench (ABB) 提供了把外部 Agent project 转换为可重复 benchmark target 所需的组件：基于 registry 的 discovery、framework adapters、Docker runtime support、通过 Model Interceptor 路由模型凭据、只追加 result artifacts、本地 result viewing，以及从 `adapting` 到 `ready` 的 certification。这让你可以用同一组 DefuzeX Cases 一致地比较不同 Agent，同时保持 runtime behavior、outputs 和 judgment evidence 可检查。
 
 ## 引用和许可证
 

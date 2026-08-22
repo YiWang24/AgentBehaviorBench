@@ -9,10 +9,13 @@ from pathlib import Path
 
 from agentbench.harness import SuiteRunner
 from agentbench.harness.registry import load_registry
+from agentbench.runtime.interception import DEFAULT_TRACE_MAX_BYTES
 
 from agentbench.cli.constants import ANSI_GREEN, LOGO_PAUSE_SECONDS
 from agentbench.cli.execution import run_benchmark_once, stop_viewer
+from agentbench.cli.environment import load_project_environment
 from agentbench.cli.logo import print_logo
+from agentbench.cli.TerminalUI import LLMActivity
 from agentbench.cli.presentation import (
     confirm_agents,
     panel_line,
@@ -21,6 +24,7 @@ from agentbench.cli.presentation import (
     request_viewer_action,
 )
 from agentbench.cli.viewer import RunningViewer, start_viewer_server
+from agentbench.cli.trace_runtime import build_trace_suite_runner
 
 from .base import CommandFeature
 
@@ -31,6 +35,11 @@ DEFAULT_REGISTRY_PATH = (
 
 def configure_parser(parser: ArgumentParser) -> None:
     parser.add_argument(
+        "--env-file",
+        metavar="PATH",
+        help="Load host secrets and defaults from PATH instead of .env.",
+    )
+    parser.add_argument(
         "--output",
         metavar="PATH",
         help=(
@@ -38,10 +47,36 @@ def configure_parser(parser: ArgumentParser) -> None:
             "trace-like step data."
         ),
     )
+    parser.add_argument(
+        "--model",
+        metavar="OPENROUTER_MODEL",
+        help="OpenRouter model slug; defaults to OPENROUTER_MODEL.",
+    )
+    parser.add_argument(
+        "--llm-trace",
+        choices=("off", "terminal"),
+        default="off",
+        help="Print sanitized intercepted model requests and responses.",
+    )
+    parser.add_argument(
+        "--llm-trace-max-bytes",
+        type=int,
+        default=DEFAULT_TRACE_MAX_BYTES,
+        metavar="BYTES",
+        help="Maximum intercepted payload bytes displayed per direction.",
+    )
 
 
 def execute(args: Namespace) -> int:
-    return run(output_path=args.output)
+    load_project_environment(args.env_file)
+    kwargs: dict[str, object] = {"output_path": args.output}
+    if args.model is not None:
+        kwargs["model"] = args.model
+    if args.llm_trace != "off":
+        kwargs["llm_trace"] = args.llm_trace
+    if args.llm_trace_max_bytes != DEFAULT_TRACE_MAX_BYTES:
+        kwargs["llm_trace_max_bytes"] = args.llm_trace_max_bytes
+    return run(**kwargs)
 
 
 def run(
@@ -54,6 +89,9 @@ def run(
     output_path: str | Path | None = None,
     viewer_starter: Callable[[Path], RunningViewer] = start_viewer_server,
     post_run_input_fn: Callable[[str], str] = input,
+    llm_trace: str = "off",
+    llm_trace_max_bytes: int = DEFAULT_TRACE_MAX_BYTES,
+    model: str | None = None,
 ) -> int:
     """Confirm ready Agents, run the suite, and return a shell exit code."""
 
@@ -83,7 +121,14 @@ def run(
     ):
         return 0
 
-    runner = suite_runner or SuiteRunner()
+    llm_activity = LLMActivity(output_fn)
+    runner = suite_runner or build_trace_suite_runner(
+        mode=llm_trace,
+        max_bytes=llm_trace_max_bytes,
+        output_fn=output_fn,
+        model=model,
+        activity_sink=llm_activity,
+    )
     while True:
         execution = run_benchmark_once(
             agents,
@@ -91,6 +136,7 @@ def run(
             output_path=output_path,
             output_fn=output_fn,
             viewer_starter=viewer_starter,
+            llm_activity=llm_activity,
         )
         if execution.result_log is None or execution.viewer is None:
             return execution.exit_code

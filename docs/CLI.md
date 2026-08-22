@@ -25,8 +25,10 @@ environment. Before running a benchmark, make sure that:
 - Python 3.10 or later is available.
 - `DEFUZEX_API_KEY` is configured in the current terminal environment.
 - Docker Desktop is running when the target Agent uses the Docker runtime.
-- Model credentials and other required environment variables declared by the
-  target Agent's `agent.toml` are configured.
+- `OPENROUTER_API_KEY` is configured for intercepted Docker Agents.
+- A model is supplied with `--model` or `OPENROUTER_MODEL`.
+- Other required environment variables declared by the target Agent's
+  `agent.toml` are configured.
 - The Agent is registered in `resources/registry.toml`, and its directory,
   `agent.toml`, and requirement file exist.
 
@@ -42,7 +44,7 @@ Current subcommands:
 | --- | --- |
 | `run` | Run all enabled Agents whose status is `ready`. |
 | `view` | Open an existing JSONL result in the local web viewer. |
-| `certify` | Fully test one `adapting` Agent and promote it to `ready` on success. |
+| `certify` | Verify one `adapting` Agent can complete its requested Cases and promote it to `ready`. |
 
 ## 2. Default Command and Compatibility
 
@@ -73,12 +75,17 @@ Root-level `-h` or `--help` shows all subcommands and is not rewritten to
 ### 3.1 Syntax
 
 ```text
-agentbench run [-h] [--output PATH]
+agentbench run [-h] [--env-file PATH] [--output PATH]
+               [--model OPENROUTER_MODEL]
+               [--llm-trace {off,terminal}]
+               [--llm-trace-max-bytes BYTES]
 ```
 
 ```powershell
 python -m agentbench run
+python -m agentbench run --model openai/gpt-4.1-mini
 python -m agentbench run --output results\result.json
+python -m agentbench run --llm-trace terminal
 ```
 
 ### 3.2 Arguments
@@ -86,7 +93,11 @@ python -m agentbench run --output results\result.json
 | Argument | Required | Default | Description |
 | --- | --- | --- | --- |
 | `-h`, `--help` | No | - | Show `run` help and exit. |
+| `--env-file PATH` | No | Repository `.env` | Load host-only secrets and defaults from another dotenv file. |
 | `--output PATH` | No | Do not save | Save a unique append-only JSONL result and start the local viewer. |
+| `--model OPENROUTER_MODEL` | No | `OPENROUTER_MODEL` | Force every intercepted Agent request to use this OpenRouter model slug. |
+| `--llm-trace {off,terminal}` | No | `off` | Print sanitized model requests and responses captured by the transparent Interceptor. |
+| `--llm-trace-max-bytes BYTES` | No | `262144` | Maximum payload bytes displayed for each request or response. |
 
 `PATH` is the naming base for the result file, not the final file name.
 AgentBench adds a timestamp and always writes `.jsonl`:
@@ -168,7 +179,10 @@ Viewer action? [r rerun/q quit]:
 ### 4.1 Syntax
 
 ```text
-agentbench certify [-h] [--output PATH] agent_id
+agentbench certify [-h] [--env-file PATH] [--output PATH]
+                   [--model OPENROUTER_MODEL]
+                   [--llm-trace {off,terminal}]
+                   [--llm-trace-max-bytes BYTES] agent_id
 ```
 
 Most common invocation:
@@ -182,7 +196,11 @@ python -m agentbench certify swe-agent
 | Argument | Required | Default | Description |
 | --- | --- | --- | --- |
 | `agent_id` | Yes | - | Stable Agent ID from `resources/registry.toml`. |
+| `--env-file PATH` | No | Repository `.env` | Load host-only secrets and defaults from another dotenv file. |
 | `--output PATH` | No | `results\certify-<agent_id>.jsonl` | Custom naming base for the certification result. |
+| `--model OPENROUTER_MODEL` | No | `OPENROUTER_MODEL` | Force intercepted calls to use this OpenRouter model slug. |
+| `--llm-trace {off,terminal}` | No | `off` | Print sanitized intercepted model traffic during certification. |
+| `--llm-trace-max-bytes BYTES` | No | `262144` | Maximum displayed bytes per model request or response. |
 | `-h`, `--help` | No | - | Show `certify` help and exit. |
 
 Unlike normal `run`, `certify` always saves a unique JSONL result whether or not
@@ -205,7 +223,7 @@ python -m agentbench certify swe-agent `
 
 | Current state | Behavior |
 | --- | --- |
-| `adapting` | Run full certification; change to `ready` when the suite passes. |
+| `adapting` | Run full certification; change to `ready` when all requested Cases complete without startup, runtime, or invocation errors. Judge failures do not block promotion. |
 | `ready` | Treat as already certified, return success, and do not rerun. |
 | `planned`, `blocked`, or any other state | Refuse certification and exit with code `2`. |
 | `enabled = false` | Refuse certification and exit with code `2`. |
@@ -223,15 +241,19 @@ Certification uses the same trusted host flow as normal benchmarks:
 6. Submit to the DefuzeX Judge.
 7. Append complete events and results to the certification JSONL.
 8. Atomically update the Registry status from `adapting` to `ready` only when
-   all requested Cases pass.
+   all requested Cases complete without startup, runtime, or invocation errors.
 
 None of the following situations promote the Agent:
 
-- Agent startup, invocation, or Judge failure;
-- any Case does not pass;
+- Agent startup, runtime, or invocation failure;
+- any requested Case does not complete;
 - execution is interrupted;
 - the Registry status changes during certification;
 - the target Registry block is missing `status`.
+
+A DefuzeX Judge failure means the Agent completed the workflow but did not
+satisfy the benchmark. Certification still promotes the Agent because `ready`
+means the adapter/runtime is runnable, not that benchmark quality is high.
 
 The status update modifies only the target Agent's `status` line and preserves
 field order, comments, and other Agents in the Registry. The temporary file is
@@ -320,11 +342,11 @@ Review result files for sensitive data before sharing or submitting them.
 | Exit code | Commands | Meaning |
 | --- | --- | --- |
 | `0` | `run` | User cancelled, or all selected benchmarks passed. |
-| `0` | `certify` | Certification passed and promoted the Agent, or the Agent was already `ready`. |
+| `0` | `certify` | Certification completed and promoted the Agent, completed with Judge failures but still promoted, or the Agent was already `ready`. |
 | `0` | `view` | Viewer stopped normally. |
 | `1` | `run` | No runnable ready Agents, shared configuration failed, or at least one benchmark failed. |
-| `1` | `certify` | Full certification suite failed or shared configuration failed. |
-| `2` | `certify` | Agent does not exist, is disabled, has a disallowed state, or Registry update failed after passing. |
+| `1` | `certify` | Certification did not complete because of shared configuration, startup, runtime, or invocation failure. |
+| `2` | `certify` | Agent does not exist, is disabled, has a disallowed state, or Registry update failed after certification completed. |
 | `2` | all commands | `argparse` detected an unknown command, unknown argument, or missing required argument. |
 
 Unhandled exceptions that are not converted by the CLI, such as a missing file
@@ -351,10 +373,11 @@ This is expected. Use:
 python -m agentbench certify <agent_id>
 ```
 
-After certification passes, the Registry automatically changes to `ready`, and
-the next normal `run` can select the Agent.
+After certification completes without startup, runtime, or invocation errors,
+the Registry automatically changes to `ready`, and the next normal `run` can
+select the Agent.
 
-### `certify` passed the benchmark, but the Registry was not updated
+### `certify` completed, but the Registry was not updated
 
 Check the last terminal line. If the Registry status changed during
 certification, or the target block is missing `status`, the CLI refuses to

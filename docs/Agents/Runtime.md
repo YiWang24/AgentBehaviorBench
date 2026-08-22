@@ -1,12 +1,14 @@
 # Runtime Contract
 
 This page covers the details that most often break Agent onboarding: Docker
-filesystem layout, Python packaging, JSONL workers, and model Gateway wiring.
+filesystem layout, Python packaging, JSONL workers, and model interception.
 
 ## Docker Filesystem
 
-AgentBench runs Agent containers with a read-only root filesystem, no public
-egress, dropped Linux capabilities, and fresh tmpfs mounts.
+AgentBench runs Agent containers with a read-only root filesystem, dropped
+Linux capabilities, and fresh tmpfs mounts. Docker Agents with
+`[llm_interception]` share the trusted Interceptor's network namespace; their
+public traffic is controlled by that Interceptor.
 
 | Path | Runtime behavior | Use |
 | --- | --- | --- |
@@ -110,24 +112,64 @@ Rules:
 - Normalize output to stable public behavior, not raw LangChain objects.
 - Keep `raw_output` safe and serializable.
 
-## Model Gateway
+## Model Interceptor
 
-Model credentials belong to `[model]`, not `runtime.secret_env_keys`. The Agent
-container receives a temporary Gateway token through the Agent-facing variables
-declared in `agent.toml`.
+The Agent container receives a temporary per-run token through the declared
+Agent-facing variable. It continues to call the original public model URL;
+transparent network interception validates that token, rewrites the request to
+OpenRouter, and applies the run-selected model. `OPENROUTER_API_KEY` belongs to
+the run environment, not the Agent manifest or `runtime.secret_env_keys`.
 
 For OpenAI-compatible Agents:
 
 ```toml
-[model]
-provider = "openai"
-protocol = "openai"
-model = "gpt-4o-mini"
-credential_env = "OPENAI_API_KEY"
-base_url_env = "OPENAI_BASE_URL"
-api_key_env = "OPENAI_API_KEY"
-model_env = "OPENAI_MODEL"
-gateway_path = "/v1"
+[llm_interception]
+required = true
+trust_plugin = "pem-env"
+
+[[llm_interception.credentials]]
+id = "primary"
+agent_env = "OPENAI_API_KEY"
+auth_plugin = "bearer-token"
+
+[[llm_interception.routes]]
+id = "openai-chat"
+host_patterns = ["api.openai.com"]
+ports = [443]
+methods = ["POST"]
+path_patterns = ["/v1/chat/completions"]
+protocol_plugin = "openai-chat"
+credential = "primary"
 ```
 
-The real provider key stays in the trusted Gateway.
+This minimal declaration is enough when the Agent already calls
+`https://api.openai.com/v1/chat/completions` and reads `OPENAI_API_KEY`. The
+Agent keeps its original SDK, URL, payload, and source model. `agent_env` must
+match the variable the existing client reads, while the route must describe the
+request the client actually sends.
+
+`[llm_interception.environment]` is optional. Use it only for ordinary settings
+the Agent genuinely needs, not to redirect a supported client to OpenRouter:
+
+```toml
+[llm_interception.environment]
+AGENT_LOG_LEVEL = "warning"
+```
+
+Run with one model-controlled OpenRouter target:
+
+```powershell
+$env:OPENROUTER_API_KEY = "..."
+python -m agentbench run --model "openai/gpt-4.1-mini"
+```
+
+`OPENROUTER_MODEL` may be used instead of `--model`. The real OpenRouter key
+stays in the trusted Interceptor. The Agent image must
+declare a non-root `USER`, trust the run-specific CA through the selected Trust
+plugin, and use a supported TCP-based HTTP protocol. Unmatched traffic is
+forwarded without model Trace output.
+
+Source changes are a compatibility fallback, not an onboarding step. They are
+needed only for clients that cannot accept a temporary credential, cannot trust
+the runtime CA, pin certificates, use an unsupported protocol, or bypass normal
+TCP HTTP model requests.

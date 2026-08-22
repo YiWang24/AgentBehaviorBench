@@ -287,6 +287,36 @@ def test_cli_parses_output_argument(monkeypatch, tmp_path) -> None:
     assert calls[-1] == {"output_path": str(output_path)}
 
 
+def test_cli_parses_terminal_llm_trace_options(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_run(**kwargs):  # type: ignore[no-untyped-def]
+        calls.append(kwargs)
+        return 0
+
+    monkeypatch.setattr("agentbench.cli.features.run.run", fake_run)
+
+    assert cli(
+        [
+            "run",
+            "--model",
+            "openai/gpt-4.1-mini",
+            "--llm-trace",
+            "terminal",
+            "--llm-trace-max-bytes",
+            "4096",
+        ]
+    ) == 0
+    assert calls == [
+        {
+            "output_path": None,
+            "model": "openai/gpt-4.1-mini",
+            "llm_trace": "terminal",
+            "llm_trace_max_bytes": 4096,
+        }
+    ]
+
+
 def test_cli_dispatches_view_command(monkeypatch, tmp_path) -> None:
     calls: list[tuple[str, str, int]] = []
     result_log = tmp_path / "result.jsonl"

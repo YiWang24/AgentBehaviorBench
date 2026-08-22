@@ -21,6 +21,40 @@ def test_cli_dispatches_certify_command(monkeypatch) -> None:
     assert calls == [("test-agent", None)]
 
 
+def test_cli_dispatches_certify_trace_options(monkeypatch) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_certify(agent_id, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append((agent_id, kwargs))
+        return 0
+
+    monkeypatch.setattr("agentbench.cli.features.certify.certify", fake_certify)
+
+    assert cli(
+        [
+            "certify",
+            "test-agent",
+            "--model",
+            "openai/gpt-4.1-mini",
+            "--llm-trace",
+            "terminal",
+            "--llm-trace-max-bytes",
+            "8192",
+        ]
+    ) == 0
+    assert calls == [
+        (
+            "test-agent",
+            {
+                "output_path": None,
+                "model": "openai/gpt-4.1-mini",
+                "llm_trace": "terminal",
+                "llm_trace_max_bytes": 8192,
+            },
+        )
+    ]
+
+
 def test_certify_promotes_passing_adapting_agent(tmp_path: Path) -> None:
     registry_path = _write_registry(tmp_path, status="adapting")
     output: list[str] = []

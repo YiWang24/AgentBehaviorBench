@@ -168,8 +168,9 @@ pytest tests/test_notebooks.py -v
 
 AgentBehaviorBench (ABB) runs the basic `email_assistant` graph in a restricted Docker
 container. The container communicates over persistent JSONL stdin/stdout and
-uses the trusted Model Gateway for OpenAI requests; the real `OPENAI_API_KEY`
-is never injected into the Agent container.
+uses the trusted Model Interceptor for OpenAI requests. Its Agent-side
+`OPENAI_API_KEY` contains a temporary per-run token; the real
+`OPENROUTER_API_KEY` is never injected into the Agent container.
 
 Official DefuzeX Cases provide plain text containing the incoming email body.
 The Worker supplies synthetic sender, recipient, and subject metadata. Local
@@ -189,11 +190,12 @@ The public result contains the triage classification and normalized tool
 actions. From the AgentBehaviorBench (ABB) repository root, run:
 
 ```powershell
-python -m agentbench certify email-assistant
+$env:OPENROUTER_API_KEY = "sk-or-..."
+python -m agentbench certify email-assistant --model openai/gpt-4.1-mini
 ```
 
-`OPENAI_API_KEY` must be available in the launching terminal. The benchmark
-uses mock email and calendar tools; it does not access a real Gmail account.
+The benchmark uses mock email and calendar tools; it does not access a real
+Gmail account.
 
 ## Future Extensions
 

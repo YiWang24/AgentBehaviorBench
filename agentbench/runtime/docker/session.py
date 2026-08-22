@@ -28,6 +28,8 @@ class DockerSession:
         *,
         timeout_sec: float,
         close_callback: Callable[[], None],
+        invoke_start_callback: Callable[[], object] | None = None,
+        invoke_complete_callback: Callable[[object], None] | None = None,
     ) -> None:
         if process.stdin is None or process.stdout is None or process.stderr is None:
             raise DockerSessionError("Docker process pipes were not created")
@@ -37,6 +39,8 @@ class DockerSession:
         self._stderr: deque[str] = deque(maxlen=100)
         self._timeout_sec = timeout_sec
         self._close_callback = close_callback
+        self._invoke_start_callback = invoke_start_callback
+        self._invoke_complete_callback = invoke_complete_callback
         self._closed = False
         self._lock = threading.Lock()
         threading.Thread(
@@ -62,6 +66,11 @@ class DockerSession:
         if not self.is_running:
             raise DockerSessionError(self._exit_message())
         request = {"input": value, "run_config": run_config}
+        invocation_state = (
+            self._invoke_start_callback()
+            if self._invoke_start_callback is not None
+            else None
+        )
         try:
             encoded = json.dumps(
                 request,
@@ -97,10 +106,13 @@ class DockerSession:
             raise DockerSessionError(str(error))
         if "output" not in response:
             raise DockerSessionError("Agent response does not contain 'output'")
-        return AdapterInvocation(
+        invocation = AdapterInvocation(
             output=response["output"],
             raw_output=response.get("raw_output", response),
         )
+        if self._invoke_complete_callback is not None:
+            self._invoke_complete_callback(invocation_state)
+        return invocation
 
     async def ainvoke(
         self, value: object, *, run_config: object | None = None

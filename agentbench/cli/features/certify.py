@@ -9,9 +9,13 @@ from pathlib import Path
 
 from agentbench.harness import BenchmarkSuiteResult, SuiteRunner
 from agentbench.harness.registry import load_registry
+from agentbench.runtime.interception import DEFAULT_TRACE_MAX_BYTES
 
 from agentbench.cli.execution import run_benchmark_once
+from agentbench.cli.environment import load_project_environment
 from agentbench.cli.registry_status import RegistryStatusError, update_agent_status
+from agentbench.cli.TerminalUI import LLMActivity
+from agentbench.cli.trace_runtime import build_trace_suite_runner
 
 from .base import CommandFeature
 from .run import DEFAULT_REGISTRY_PATH
@@ -20,14 +24,44 @@ from .run import DEFAULT_REGISTRY_PATH
 def configure_parser(parser: ArgumentParser) -> None:
     parser.add_argument("agent_id", help="Registered adapting Agent to certify.")
     parser.add_argument(
+        "--env-file",
+        metavar="PATH",
+        help="Load host secrets and defaults from PATH instead of .env.",
+    )
+    parser.add_argument(
         "--output",
         metavar="PATH",
         help="Optional base path for the append-only certification result.",
     )
+    parser.add_argument(
+        "--model",
+        metavar="OPENROUTER_MODEL",
+        help="OpenRouter model slug; defaults to OPENROUTER_MODEL.",
+    )
+    parser.add_argument(
+        "--llm-trace",
+        choices=("off", "terminal"),
+        default="off",
+        help="Print sanitized intercepted model requests and responses.",
+    )
+    parser.add_argument(
+        "--llm-trace-max-bytes",
+        type=int,
+        default=DEFAULT_TRACE_MAX_BYTES,
+        metavar="BYTES",
+    )
 
 
 def execute(args: Namespace) -> int:
-    return certify(args.agent_id, output_path=args.output)
+    load_project_environment(args.env_file)
+    kwargs: dict[str, object] = {"output_path": args.output}
+    if args.model is not None:
+        kwargs["model"] = args.model
+    if args.llm_trace != "off":
+        kwargs["llm_trace"] = args.llm_trace
+    if args.llm_trace_max_bytes != DEFAULT_TRACE_MAX_BYTES:
+        kwargs["llm_trace_max_bytes"] = args.llm_trace_max_bytes
+    return certify(args.agent_id, **kwargs)
 
 
 def certify(
@@ -37,6 +71,9 @@ def certify(
     output_path: str | Path | None = None,
     output_fn: Callable[[str], None] = print,
     suite_runner: SuiteRunner | None = None,
+    llm_trace: str = "off",
+    llm_trace_max_bytes: int = DEFAULT_TRACE_MAX_BYTES,
+    model: str | None = None,
 ) -> int:
     """Run one adapting Agent and promote it after adapter execution succeeds."""
 
@@ -63,12 +100,21 @@ def certify(
         "The registry will change to ready if the Agent completes its Cases "
         "without invocation errors."
     )
+    llm_activity = LLMActivity(output_fn)
     execution = run_benchmark_once(
         (agent,),
-        runner=suite_runner or SuiteRunner(),
+        runner=suite_runner
+        or build_trace_suite_runner(
+            mode=llm_trace,
+            max_bytes=llm_trace_max_bytes,
+            output_fn=output_fn,
+            model=model,
+            activity_sink=llm_activity,
+        ),
         output_path=artifact_base,
         output_fn=output_fn,
         viewer_starter=None,
+        llm_activity=llm_activity,
     )
     if execution.result is None or not _agent_completed_certification(
         execution.result, agent_id

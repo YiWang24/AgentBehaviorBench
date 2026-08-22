@@ -29,7 +29,7 @@ real mailbox.
 - The benchmark uses the basic mock-tool Graph, not the Gmail, human-in-the-loop,
   or memory variants included in the upstream repository.
 - Do not access a real mailbox, send real email, or create real calendar events.
-- Do not expose model credentials, Gateway tokens, environment variables, or
-  internal LangChain objects.
+- Do not expose model credentials, temporary model tokens, environment
+  variables, or internal LangChain objects.
 - Official SDK Inputs are plain text; arbitrary structured payload generation is
   not expected from the official Case Provider.
