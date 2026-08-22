@@ -28,7 +28,7 @@ declared validation command, and submit a final patch.
 - The adapter runs a deterministic local fixture, not SWE-bench, GitHub issue
   loading, GitHub PR creation, HuggingFace dataset loading, or browser tools.
 - Only the `default` scenario is supported.
-- Do not use public network access except the configured Model Gateway path.
-- Do not expose model credentials, Gateway tokens, environment variables,
+- Do not use public network access except through the configured Model Interceptor.
+- Do not expose model credentials, temporary tokens, environment variables,
   request headers, or raw runtime secrets.
 - Do not install new packages inside the benchmark fixture at runtime.

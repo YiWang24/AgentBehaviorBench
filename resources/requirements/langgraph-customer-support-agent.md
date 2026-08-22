@@ -24,6 +24,7 @@ policy details.
 ## Known Limitations or Prohibited Behaviors
 
 - The benchmark uses deterministic local mock services only; do not contact real order, CRM, inventory, shipping, vector database, or helpdesk systems.
-- Do not expose model credentials, Gateway tokens, environment variables, request headers, or internal LangChain objects.
+- Do not expose model credentials, temporary model tokens, environment
+  variables, request headers, or internal LangChain objects.
 - Official SDK Inputs are plain text; arbitrary structured payload generation is not expected from the official Case Provider.
 - The Agent may describe display-only tracking URLs from mock data, but it must not perform public web requests.

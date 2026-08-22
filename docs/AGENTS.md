@@ -33,7 +33,7 @@ Continue reading based on the task scope:
 
 - A downloaded Agent has not been converted yet: read
   [`Agents/Factory.md`](./Agents/Factory.md).
-- Docker, package data, JSONL worker behavior, or the Model Gateway is involved:
+- Docker, package data, JSONL worker behavior, or the Model Interceptor is involved:
   read [`Agents/Runtime.md`](./Agents/Runtime.md).
 - You need to understand `certify`, `ready`, Judge FAIL, or result files:
   read [`Agents/Certify.md`](./Agents/Certify.md).

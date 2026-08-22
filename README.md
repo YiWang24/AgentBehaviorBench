@@ -37,8 +37,9 @@ and judging whether it completed the requested workflow correctly.
 
 Given a registered Agent and a benchmark Case, AgentBehaviorBench (ABB) runs the Agent through
 a trusted host harness. The harness can launch framework-specific or
-containerized Agents, route model traffic through a credential-safe Model
-Gateway, record each SDK input and Agent response as append-only JSONL events,
+containerized Agents, transparently route model traffic through a
+credential-safe Model Interceptor into a run-selected OpenRouter model, record
+each SDK input and Agent response as append-only JSONL events,
 and submit the completed run to the DefuzeX Judge.
 
 AgentBehaviorBench (ABB) is designed to make Agent evaluation reproducible. Agents are
@@ -64,8 +65,8 @@ The repository includes:
 - `agentbench/adapter`: framework-neutral adapter contract and LangGraph support.
 - `agentbench/runtime`: local and Docker runtime integration.
 - `resources/agents`: reproducible benchmark agent fixtures.
-- `services/model-gateway`: trusted proxy for model provider access in Docker
-  runs.
+- `services/model-interceptor`: transparent TLS, authentication, streaming, and
+  OpenRouter routing and model Trace service for Docker runs.
 
 ![AgentBehaviorBench (ABB) framework](figures/framework.png)
 
@@ -152,6 +153,17 @@ Set a DefuzeX API key when using official Case or Judge providers:
 $env:DEFUZEX_API_KEY = "dfx_<public-id>.<secret>"
 ```
 
+Docker Agents route model traffic through OpenRouter. Configure its key and
+choose one model for the complete benchmark run:
+
+```powershell
+Copy-Item .env.example .env
+# Edit .env locally; it is ignored by Git and loaded automatically by the CLI.
+```
+
+PowerShell environment variables override `.env`, and
+`python -m agentbench run --model <slug>` overrides `OPENROUTER_MODEL`.
+
 Run the test suite:
 
 ```powershell
@@ -169,7 +181,7 @@ onboarding flow documented there.
 
 AgentBehaviorBench (ABB) provides the pieces needed to turn an external Agent project into a
 repeatable benchmark target: registry-based discovery, framework adapters,
-Docker runtime support, model credential routing through the Model Gateway,
+Docker runtime support, model credential routing through the Model Interceptor,
 append-only result artifacts, local result viewing, and certification from
 `adapting` to `ready`. This gives you a consistent way to compare Agents across
 the same DefuzeX Cases while keeping runtime behavior, outputs, and judgment

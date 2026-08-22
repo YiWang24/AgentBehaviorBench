@@ -34,5 +34,9 @@ class AgentRunner:
             adapter.load()
         except Exception as exc:
             adapter.close()
-            raise AgentStartError(f"Failed to start agent {agent.agent_id!r}") from exc
+            detail = str(exc).strip()
+            cause = type(exc).__name__ if not detail else f"{type(exc).__name__}: {detail}"
+            raise AgentStartError(
+                f"Failed to start agent {agent.agent_id!r}: {cause}"
+            ) from exc
         return RunningAgent(registration=agent, adapter=adapter)

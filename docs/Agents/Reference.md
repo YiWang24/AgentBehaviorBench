@@ -23,7 +23,7 @@ SuiteRunner executes the selected Agents sequentially
 RuntimeFactory selects the execution backend
         |
         v
-DockerRuntime builds the Agent and starts the Model Gateway
+DockerRuntime builds the Agent and starts the Model Interceptor
         |
         v
 AgentRunner starts a ContainerAgentAdapter
@@ -51,8 +51,8 @@ An Agent may be added when all of the following are true:
 - It is a complete Python project with a stable Graph entry point.
 - It can run as a non-root process in the restricted Docker runtime.
 - It provides a persistent JSONL stdin/stdout worker.
-- Its model API uses one of the supported Gateway protocols: `openai`,
-  `anthropic`, or `google`.
+- If it calls a model, its native HTTP traffic can be identified by a reviewed
+  Model Interceptor protocol, authentication, and target plugin combination.
 - Its inputs and outputs can be converted to JSON-compatible values.
 
 ### Rejected for now
@@ -166,7 +166,7 @@ Directory rules:
 Use this Docker Agent template:
 
 ```toml
-schema_version = "defuzex-bench.agent.v1"
+schema_version = "defuzex-bench.agent.v2"
 agent_id = "my-langgraph-agent"
 display_name = "My LangGraph Agent"
 framework = "langgraph"
@@ -192,17 +192,23 @@ timeout_sec = 60
 env_keys = []
 secret_env_keys = []
 
-[model]
-provider = "openai"
-protocol = "openai"
-model = "gpt-4.1-mini"
-upstream_base_url = "https://api.openai.com"
-upstream_base_url_env = "OPENAI_BASE_URL"
-credential_env = "OPENAI_API_KEY"
-base_url_env = "OPENAI_BASE_URL"
-api_key_env = "OPENAI_API_KEY"
-model_env = "OPENAI_MODEL"
-gateway_path = "/v1"
+[llm_interception]
+required = true
+trust_plugin = "pem-env"
+
+[[llm_interception.credentials]]
+id = "primary"
+agent_env = "OPENAI_API_KEY"
+auth_plugin = "bearer-token"
+
+[[llm_interception.routes]]
+id = "openai-chat"
+host_patterns = ["api.openai.com"]
+ports = [443]
+methods = ["POST"]
+path_patterns = ["/v1/chat/completions"]
+protocol_plugin = "openai-chat"
+credential = "primary"
 
 [adapter]
 type = "langgraph"
@@ -217,7 +223,7 @@ output_key = "response"
 
 | Field | Meaning |
 | --- | --- |
-| `schema_version` | Must currently be `defuzex-bench.agent.v1`. |
+| `schema_version` | Docker Agents using model interception must use `defuzex-bench.agent.v2`. |
 | `agent_id` | Stable globally unique ID; must match the Registry entry. |
 | `display_name` | Human-readable name. |
 | `framework` | Must currently be `langgraph`. |
@@ -232,12 +238,15 @@ output_key = "response"
 | `runtime.timeout_sec` | Maximum time for one invocation. |
 | `runtime.env_keys` | Allowlisted non-secret host environment variables. |
 | `runtime.secret_env_keys` | Required Agent-side secrets; use only after security review. |
-| `model.*` | Provider endpoint, credential source, Agent-facing variables, and Gateway path. |
+| `llm_interception.*` | Transparent traffic patterns, Agent environment, temporary credential bindings, and source protocol plugin IDs. |
 | `adapter.*` | Framework entry point and expected Graph I/O metadata. |
 
-Model credentials must use `[model]`. Do not put model API keys in
-`runtime.secret_env_keys`, because model keys belong in the trusted Gateway and
-must never enter the Agent container.
+`[llm_interception.credentials]` declares only the Agent-facing temporary token.
+`agent_env` must name the credential variable the existing model client already
+reads. `[llm_interception.environment]` is optional and should contain only
+ordinary Agent settings that are actually needed. Do not put model API keys in
+`runtime.secret_env_keys`; the run-level `OPENROUTER_API_KEY` is mounted only
+into the trusted Interceptor.
 
 For `runtime.type = "docker"`, `[adapter]` records the framework entry point and
 expected I/O. The host does not import the Graph. The JSONL worker performs the
@@ -575,7 +584,9 @@ the Agent actually runs. Therefore:
 - If an upstream Agent requires executable uploaded tools, point those tools at
   `/run/agentbench-tools`, not `/tmp`.
 
-The Agent container uses an internal Agent network without public egress.
+Docker Agents with model interception share the Interceptor's network namespace.
+Matched model requests are intercepted; unmatched traffic is not recorded as
+model Trace. Benchmark-specific rules may still prohibit non-model network use.
 
 ### Dependency review
 
@@ -598,7 +609,7 @@ include = ["my_agent*"]
 A declaration such as `packages = ["my_agent"]` may omit
 `my_agent.tools` and other required subpackages.
 
-## 9. Configure the Model Gateway
+## 9. Configure the Model Interceptor
 
 AgentBench has three separate dependency and trust boundaries:
 
@@ -609,88 +620,92 @@ Host Harness
 Agent container
     `-- Agent framework and Agent-owned dependencies
 
-Standalone Model Gateway
-    `-- Provider authentication and HTTP forwarding only
+Standalone Model Interceptor
+    `-- Transparent TLS, provider authentication, streaming, and Trace
 ```
 
 The DefuzeX SDK is a Host dependency. It must not be installed in the Agent
-container or copied into the Model Gateway image. Likewise, Agent frameworks
-such as LangGraph belong to Agent images and are not Gateway dependencies.
+container or copied into the Model Interceptor image. Likewise, Agent frameworks
+such as LangGraph belong to Agent images and are not Interceptor dependencies.
 
-The Agent container has no public network access. Model traffic follows this
-path:
+The Agent shares the Interceptor's isolated network namespace. Model traffic
+follows this path without changing the Agent's original public URL:
 
 ```text
 Agent container
     | temporary per-run token
     v
-Trusted Model Gateway
-    | real provider credential
+Transparent Model Interceptor
+    | OpenRouter target rewrite, TLS Trace, and real credential
     v
-Declared upstream model endpoint
+OpenRouter
 ```
 
-The real provider key is mounted only into the Gateway. The Agent receives a
-temporary token in the environment variable expected by its model client.
+The real provider key is mounted only into the Interceptor. The Agent receives
+a temporary token in the environment variable expected by its model client.
+Matched requests are decoded by the declared source protocol plugin. The
+OpenRouter target plugin preserves the protocol skin, maps its endpoint, and
+overrides the request model with the run-selected OpenRouter slug. Responses and
+SSE chunks are returned using the source protocol skin.
 
-The current Gateway supports same-protocol forwarding for:
+Do not rewrite a compatible Agent to call OpenRouter. Keep its original model
+SDK, public provider URL, payload shape, and source model behavior. Declare the
+request it already sends in `agent.toml`: the host, port, method, path, source
+protocol, credential variable, and authentication plugin. The Interceptor
+replaces the request model with the run-selected OpenRouter model before it
+leaves the trusted runtime.
 
-- OpenAI-compatible APIs
-- Anthropic APIs
-- Google model APIs
-
-It does not translate one provider protocol into another. An Agent using the
-OpenAI client must declare `protocol = "openai"`; setting `GOOGLE_API_KEY` does
-not automatically turn it into a native Google client.
-
-The Agent must read the model and endpoint variables declared in `agent.toml`.
-Do not hard-code the model name if the manifest declares a configurable model.
+Source changes are required only when the original client cannot receive a
+temporary credential, cannot trust the runtime CA, pins certificates, uses an
+unsupported wire protocol, or does not send normal TCP HTTP model traffic. A
+manifest must describe observed behavior; it must not claim capture for traffic
+the Interceptor cannot decode and forward.
 
 Required keys are resolved from the process that launches AgentBench:
 
 ```powershell
-if ($env:OPENAI_API_KEY) { "OpenAI configured" } else { "OpenAI missing" }
+if ($env:OPENROUTER_API_KEY) { "OpenRouter configured" } else { "OpenRouter missing" }
+if ($env:OPENROUTER_MODEL) { "OpenRouter model configured" } else { "Use --model" }
 if ($env:DEFUZEX_API_KEY) { "DefuzeX configured" } else { "DefuzeX missing" }
 ```
 
 Never print the values.
 
-`DEFUZEX_API_KEY` is for official DefuzeX Case and Judge Providers. Model keys
-such as `OPENAI_API_KEY` are for the Model Gateway. They are independent.
+`DEFUZEX_API_KEY` is for official DefuzeX Case and Judge Providers.
+`OPENROUTER_API_KEY` is for the Model Interceptor. They are independent. Agent
+variables such as `OPENAI_API_KEY` contain only temporary per-run tokens.
 
-### Standalone Gateway deployment
+### Standalone Interceptor deployment
 
-The trusted Gateway is an independent Python project under
-`services/model-gateway`. Its `pyproject.toml`, source tree, Dockerfile, and
-Docker build context are isolated from the root AgentBench package. Adding a
-Host dependency to AgentBench must therefore never change the Gateway image or
-make the Gateway install that dependency.
+The trusted Interceptor is an independent Python project under
+`services/model-interceptor`. Its `pyproject.toml`, source tree, Dockerfile, and
+Docker build context are isolated from the root AgentBench package.
 
-In a source checkout, `LocalGatewayImageProvider` builds that standalone
+In a source checkout, `LocalInterceptorImageProvider` builds that standalone
 service. A packaged or production deployment can provide an immutable image:
 
 ```powershell
-$env:DEFUZEX_MODEL_GATEWAY_IMAGE = "registry.example/model-gateway:1.2.3"
+$env:DEFUZEX_MODEL_INTERCEPTOR_IMAGE = "registry.example/model-interceptor:1.2.3"
 ```
 
-`DockerRuntime` depends only on the `GatewayImageProvider` contract. Do not add
+`DockerRuntime` depends only on the `InterceptorImageProvider` contract. Do not add
 repository paths, SDK installation rules, or provider-specific image selection
 to `DockerRuntime`.
 
 ### Adding another model protocol
 
-Provider protocols are trusted Gateway extensions, not Agent dependencies.
-Implement the Gateway protocol contract and register it through the
-`defuzex.model_gateway.protocols` Python entry-point group. A protocol must:
+Model protocols are trusted Interceptor extensions, not Agent dependencies.
+Implement the protocol contract and register it through the
+`defuzex.model_interceptor.protocols` Python entry-point group. A protocol
+decodes request/response JSON and SSE for Trace.
 
-- validate the temporary per-run credential received from the Agent;
-- replace it with the real upstream credential;
-- preserve a safe relative request path and approved headers;
-- avoid logging either credential; and
-- include authentication, forwarding, and failure tests.
+Authentication plugins validate temporary credentials and inject the trusted
+upstream credential through `defuzex.model_interceptor.auth`. Target provider
+plugins rewrite the upstream endpoint and model through
+`defuzex.model_interceptor.targets`. OpenRouter is the built-in target.
 
-Only reviewed protocol packages may be installed in the trusted Gateway image.
-An Agent manifest cannot install arbitrary Gateway plugins.
+CA behavior uses `defuzex.model_interceptor.trust`. Only reviewed plugins may be
+installed in trusted images; an Agent manifest cannot install arbitrary plugins.
 
 ## 10. Conversation State
 
@@ -847,8 +862,8 @@ Parse the manifest without starting Docker and assert:
 
 - `launch.argv`
 - invocation timeout
-- model protocol and model name
-- Agent-facing Gateway environment variables
+- native model host, path, protocol, and credential environment variable
+- optional Agent environment overrides, when present
 - RuntimeFactory selects `ContainerAgentAdapter`
 
 ### Worker and transport test
@@ -865,7 +880,7 @@ Cover:
 ### Docker integration test
 
 Use a deterministic local model endpoint for normal CI smoke coverage. The run
-must still traverse DockerRuntime, Model Gateway, LangGraph, and DefuzeX SDK.
+must still traverse DockerRuntime, Model Interceptor, LangGraph, and DefuzeX SDK.
 Keep real provider calls as explicitly selected integration tests.
 
 After installing pytest, run:
@@ -901,7 +916,7 @@ Certification checks whether the adapter is runnable and whether every
 requested Case completes without invocation/runtime errors. It is not a score
 threshold. A Judge failure means the Agent performed poorly on the benchmark,
 but it can still be certified as `ready` if the container, worker, model
-Gateway, input mapping, output serialization, and cleanup all completed.
+Interceptor, input mapping, output serialization, and cleanup all completed.
 
 ### Certification promotes to ready
 
@@ -955,14 +970,14 @@ Classify the first failing boundary before changing code:
 | SDK configuration check | `DEFUZEX_API_KEY`, requirement parsing, Provider selection, and required packages. |
 | Starting Agent | `agent.toml`, Docker build, non-root permissions, read-only filesystem, `/tmp` initialization, and worker command. |
 | Generating Case | requirement content, official service response, API configuration, and sensitive-data rejection. |
-| Running Agent inputs | JSONL stdout contract, stderr logs, input mapping, model Gateway variables, timeout, and output serialization. |
+| Running Agent inputs | JSONL stdout contract, stderr logs, Interceptor variables and Trace, timeout, and output serialization. |
 | DefuzeX Judge or `Judge: issue` with completed Cases | public normalized output, requirement criteria, missing evidence, and benchmark quality. This should not block `ready`. |
 | Registry update after completed execution | target `status` field and whether another process edited the Registry during certification. |
 
 Then follow this loop:
 
 1. Decide whether the failure is fixable inside the adapter, worker, manifest,
-   Docker image, requirement, or model mapping boundary.
+   Docker image, requirement, or interception route.
 2. Apply the smallest relevant fix and add a regression test for the observed
    failure.
 3. Re-run the focused tests and Docker smoke test.
@@ -1051,7 +1066,7 @@ invalid configuration for every Agent cannot succeed.
 The CLI uses the trusted host process for DefuzeX SDK orchestration and passes
 `allow_local=True` to that SDK Run. This does not run untrusted Agent code on
 the host: model-backed Agents still execute through AgentBench DockerRuntime,
-and their provider credentials remain in the Model Gateway.
+and the OpenRouter credential remains in the Model Interceptor.
 
 Programmatic batch execution uses the same Runner:
 
@@ -1210,7 +1225,7 @@ LangChain objects or credentials.
 ### Containers or networks remain after a failed run
 
 Treat this as a Runtime cleanup defect. `close()` and exception paths must remove
-the Agent container, Gateway container, temporary networks, and secret files.
+the Agent container, Interceptor container, temporary networks, and secret files.
 
 ## 16. Email Assistant Integration Lessons
 
@@ -1222,7 +1237,6 @@ tool-oriented output. Its integration exposed several reusable issues:
 | SDK froze the structured payload | `mappingproxy` failed JSON serialization | DockerSession now accepts generic mappings. |
 | Upstream package metadata included only the top package | Container could not import `email_assistant.tools` | Setuptools now discovers `email_assistant*`. |
 | The Graph printed triage logs to stdout | Logs could corrupt the JSONL protocol | Worker redirects Graph stdout to stderr. |
-| The upstream model name was hard-coded | Manifest model selection had no effect | Graph reads `OPENAI_MODEL`. |
 | The Graph had no final chat response | A string-only Judge could not evaluate behavior | Worker returns `classification` and normalized `actions`. |
 | Dockerfile and manifest both defined startup | Container command ownership was ambiguous | Runtime uses `launch.argv` only. |
 
@@ -1234,12 +1248,9 @@ actions: write_email, Done
 judge: pass
 ```
 
-Run it from the repository root:
-
-```powershell
-python -B `
-  .\examples\smoke_email_container.py
-```
+During onboarding, run this Case through `agentbench certify email-assistant` so
+the same Docker, Interceptor, SDK, and Judge path used by normal benchmarks is
+exercised.
 
 ## 17. Definition of Done
 
@@ -1262,14 +1273,17 @@ The integration is complete only when every item is verified:
       temporary data uses `/tmp`.
 - [ ] Persistent JSONL worker validates input and normalizes output.
 - [ ] stdout contains JSONL only; logs go to stderr.
-- [ ] Model traffic uses the trusted Gateway and the real model key stays outside the Agent container.
+- [ ] Model-backed Agents declare their native traffic accurately; the trusted
+      Interceptor captures it and the real model key stays outside the Agent
+      container.
 - [ ] RuntimeFactory selects the expected execution backend.
 - [ ] AgentRunner starts, invokes, and stops the Agent.
 - [ ] Stateful Agents have thread isolation tests.
 - [ ] Local or official DefuzeX SDK benchmark completes without invocation or
       runtime errors.
 - [ ] Registry, CLI, runtime, transport, and Runner tests pass.
-- [ ] Failure cleanup leaves no Agent containers, Gateway containers, networks, or secret files.
+- [ ] Failure cleanup leaves no Agent containers, Interceptor containers,
+      networks, or secret files.
 - [ ] Logs and exceptions do not expose credentials.
 - [ ] `agentbench certify <agent_id>` exits with `0` and saves its JSONL
       evidence.

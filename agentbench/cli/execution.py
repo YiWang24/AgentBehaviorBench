@@ -16,6 +16,7 @@ from agentbench.harness.registry import AgentRegistration
 from agentbench.harness.result import BenchmarkSuiteResult
 
 from .progress import ProgressPrinter, configuration_error
+from .TerminalUI import LLMActivity
 from .presentation import (
     agent_view_url,
     print_agent_complete,
@@ -44,6 +45,7 @@ def run_benchmark_once(
     output_path: str | Path | None,
     output_fn: Callable[[str], None],
     viewer_starter: ViewerStarter | None,
+    llm_activity: LLMActivity | None = None,
 ) -> BenchmarkExecution:
     suite_id = runner.new_suite_id()
     result_log: ResultLogWriter | None = None
@@ -61,42 +63,46 @@ def run_benchmark_once(
         if viewer is not None:
             output_fn(f"View: {viewer.url}")
 
-    progress_printer = ProgressPrinter(output_fn)
+    activity = llm_activity or LLMActivity(output_fn)
+    progress_printer = ProgressPrinter(output_fn, llm_activity=activity)
     try:
-        result = runner.run_defuzex(
-            agents,
-            suite_id=suite_id,
-            allow_local=True,
-            track_files=False,
-            on_agent_start=lambda agent, index, total: print_agent_start(
-                agent, index, total, output_fn
-            ),
-            on_agent_complete=lambda item: _handle_agent_complete(
-                item,
-                output_fn,
-                result_log,
-                None if viewer is None else viewer.url,
-            ),
-            on_progress=progress_printer,
-            on_step_start=(
-                None if result_log is None else result_log.append_step_started
-            ),
-            on_step_complete=(
-                None if result_log is None else result_log.append_step_completed
-            ),
-            on_step_failure=(
-                None if result_log is None else result_log.append_step_failed
-            ),
-        )
-    except (ProviderSelectionError, SuiteConfigurationError) as exc:
-        if result_log is not None:
-            result_log.append_suite_error(exc)
-        output_fn(configuration_error(exc))
-        if result_log is not None:
-            print_viewer_footer(
-                result_log.path, None if viewer is None else viewer.url, output_fn
+        try:
+            result = runner.run_defuzex(
+                agents,
+                suite_id=suite_id,
+                allow_local=True,
+                track_files=False,
+                on_agent_start=lambda agent, index, total: print_agent_start(
+                    agent, index, total, output_fn
+                ),
+                on_agent_complete=lambda item: _handle_agent_complete(
+                    item,
+                    output_fn,
+                    result_log,
+                    None if viewer is None else viewer.url,
+                ),
+                on_progress=progress_printer,
+                on_step_start=(
+                    None if result_log is None else result_log.append_step_started
+                ),
+                on_step_complete=(
+                    None if result_log is None else result_log.append_step_completed
+                ),
+                on_step_failure=(
+                    None if result_log is None else result_log.append_step_failed
+                ),
             )
-        return BenchmarkExecution(1, None, result_log, viewer)
+        except (ProviderSelectionError, SuiteConfigurationError) as exc:
+            if result_log is not None:
+                result_log.append_suite_error(exc)
+            output_fn(configuration_error(exc))
+            if result_log is not None:
+                print_viewer_footer(
+                    result_log.path, None if viewer is None else viewer.url, output_fn
+                )
+            return BenchmarkExecution(1, None, result_log, viewer)
+    finally:
+        progress_printer.close()
 
     if result_log is not None:
         result_log.append_suite_complete(result)

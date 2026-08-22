@@ -15,7 +15,7 @@ Current architecture paths:
 - [AgentFactory Flow](./Agents/Factory.md): use this when you have a downloaded
   Agent project and need to convert it into a deterministic AgentBench candidate.
 - [Runtime Contract](./Agents/Runtime.md): use this when Docker, package data,
-  JSONL worker behavior, Model Gateway routing, or filesystem rules are involved.
+  JSONL worker behavior, Model Interceptor routing, or filesystem rules are involved.
 - [Certification](./Agents/Certify.md): use this when you need to understand
   `certify`, `ready`, result artifacts, or Judge failure semantics.
 - [Troubleshooting](./Agents/Troubleshooting.md): use this when you already have
@@ -30,21 +30,36 @@ are supported.
 
 After choosing the right architecture path, start from
 [AgentFactory Flow](./Agents/Factory.md). AgentFactory should work on a copied
-Agent project, not the original source checkout, because the conversion flow may
-change project files, runtime configuration, dependencies, and launch behavior.
+Agent project, not the original source checkout. Keep the adaptation small: an
+existing model client should normally keep its SDK, public URL, request format,
+and source model configuration.
 
 Use this flow:
 
 1. Copy the original Agent project to a separate working directory.
-2. Run the copied Agent through the AgentFactory conversion flow.
-3. Convert or wrap the copied Agent according to its architecture.
+2. Identify its launch command, input/output contract, and actual model request
+   host, path, protocol, and credential environment variable.
+3. Add a non-root Docker image and a persistent JSONL worker. Wrap the existing
+   Agent instead of rewriting its workflow.
 4. Copy the adapted Agent into `resources/agents/<order>-<agent-id>/`.
-5. Add `resources/agents/<order>-<agent-id>/agent.toml`.
+5. Add `agent.toml`, declaring the native model traffic under
+   `[llm_interception]` when the Agent calls a model.
 6. Add `resources/requirements/<agent-id>.md`.
 7. Add an entry in `resources/registry.toml` with `enabled = true` and
    `status = "adapting"`.
-8. Run the focused tests for registry, Docker config, model binding, and the
-   worker.
+8. Run the focused tests for Registry discovery, Docker configuration,
+   interception routes, and the worker.
+
+Do not change model code merely to point it at OpenRouter. The Agent should keep
+calling its original provider URL with the temporary token injected into the
+environment variable it already expects. AgentBench captures the matching
+request, replaces the credential and run-selected model in the trusted
+Interceptor, forwards it to OpenRouter, and returns the response to the Agent.
+
+Modify the Agent's model integration only when its existing behavior cannot meet
+that contract, for example when it embeds a credential in source code, uses an
+unsupported wire protocol, pins TLS certificates, cannot trust the runtime CA,
+or does not provide any way to receive a temporary credential.
 
 ## Certify the Agent
 
@@ -86,8 +101,9 @@ An Agent is onboarded when:
   required.
 - The worker accepts SDK Inputs and returns serializable `output` and
   `raw_output`.
-- Model traffic goes through the trusted Model Gateway when model credentials
-  are required.
+- Model-backed Agents declare their native request route and the Interceptor
+  captures a complete request/response pair without requiring a provider rewrite
+  in Agent source.
 - Static fixtures and config files exist in the installed runtime image or
   package.
 - Runtime writes go to allowed paths.

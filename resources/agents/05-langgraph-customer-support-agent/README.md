@@ -116,12 +116,16 @@ echo '{"input":"hi"}' | docker run --rm -i -e LLM_PROVIDER=openai agentbench-lan
 ```
 
 AgentBehaviorBench (ABB) does not pass the real provider key into this container. The trusted
-Model Gateway injects:
+Model Interceptor injects:
 
 ```text
-LLM_BASE_URL=<gateway-url>/v1
+LLM_BASE_URL=https://api.openai.com/v1
 LLM_API_KEY=<temporary-run-token>
 LLM_MODEL=gpt-4.1-mini
 ```
+
+The Interceptor replaces the Agent-declared model with `--model` or
+`OPENROUTER_MODEL` and sends the request to OpenRouter using the host
+`OPENROUTER_API_KEY`.
 
 The image runs as UID `10001`.

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from agentbench.adapter import DEFAULT_ADAPTER_FACTORY
 from agentbench.harness import AgentRegistry
 from agentbench.runtime.agentcontainer import (
@@ -8,6 +10,28 @@ from agentbench.runtime.agentcontainer import (
 )
 from agentbench.runtime.contracts import EnvironmentSecretResolver
 from agentbench.runtime.factory import RuntimeFactory
+from agentbench.runtime.interception import InterceptionConfig
+
+
+@pytest.mark.parametrize(
+    "directory",
+    [
+        "02-langgraph-chat-agent",
+        "03-email-assistant",
+        "04-swe-agent",
+        "05-langgraph-customer-support-agent",
+    ],
+)
+def test_docker_agents_declare_manifest_v2_interception(
+    repo_root: Path, directory: str
+) -> None:
+    config = InterceptionConfig.from_agent_dir(
+        repo_root / "resources" / "agents" / directory
+    )
+
+    assert config is not None
+    assert config.required
+    assert config.routes
 
 
 def test_chat_agent_container_configuration_is_machine_driven(

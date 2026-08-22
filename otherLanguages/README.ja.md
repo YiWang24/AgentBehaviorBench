@@ -32,7 +32,7 @@
 
 AgentBehaviorBench (ABB) は、対象 Agent を呼び出し、その出力と実行トレースを収集し、要求されたワークフローを正しく完了したかを判定する必要があるエンドツーエンドのタスクで AI Agent を評価するためのベンチマークです。
 
-登録済みの Agent と benchmark Case が与えられると、AgentBehaviorBench (ABB) は信頼されたホスト harness を通じてその Agent を実行します。この harness は、framework 固有またはコンテナ化された Agent を起動し、credential-safe な Model Gateway を通じてモデル通信をルーティングし、各 SDK input と Agent response を append-only の JSONL events として記録し、完了した run を DefuzeX Judge に送信できます。
+登録済みの Agent と benchmark Case が与えられると、AgentBehaviorBench (ABB) は信頼されたホスト harness を通じてその Agent を実行します。この harness は、framework 固有またはコンテナ化された Agent を起動し、credential-safe な Model Interceptor を通じてモデル通信をルーティングし、各 SDK input と Agent response を append-only の JSONL events として記録し、完了した run を DefuzeX Judge に送信できます。
 
 AgentBehaviorBench (ABB) は Agent 評価を再現可能にするために設計されています。Agent は registry で宣言され、LangGraph などの framework adapter を通じて適応され、`adapting` から `ready` へ認証されます。認証に成功した Agent だけがデフォルトの benchmark run に含まれます。
 
@@ -54,7 +54,7 @@ registry.toml
 - `agentbench/adapter`：framework-neutral な adapter contract と LangGraph support。
 - `agentbench/runtime`：local runtime と Docker runtime の integration。
 - `resources/agents`：再現可能な benchmark agent fixtures。
-- `services/model-gateway`：Docker runs で model provider access を扱う信頼された proxy。
+- `services/model-interceptor`：Docker runs で model provider access を扱う透明な interceptor。
 
 ![AgentBehaviorBench (ABB) framework](../figures/framework.png)
 
@@ -136,7 +136,7 @@ Agent 向けの詳細な手順は [AGENTS.md](../AGENTS.md) から始めてく�
 
 自分の Agent を benchmark に追加したい場合は、agent に [docs/How To Add Agent.md](../docs/How%20To%20Add%20Agent.md) を読ませ、そこに記載された onboarding flow に従わせてください。
 
-AgentBehaviorBench (ABB) は、外部 Agent project を repeatable benchmark target に変換するために必要な要素を提供します。registry-based discovery、framework adapters、Docker runtime support、Model Gateway 経由の model credential routing、append-only result artifacts、local result viewing、そして `adapting` から `ready` への certification です。これにより、同じ DefuzeX Cases に対して一貫した方法で Agent を比較しながら、runtime behavior、outputs、judgment evidence を検査可能に保てます。
+AgentBehaviorBench (ABB) は、外部 Agent project を repeatable benchmark target に変換するために必要な要素を提供します。registry-based discovery、framework adapters、Docker runtime support、Model Interceptor 経由の model credential routing、append-only result artifacts、local result viewing、そして `adapting` から `ready` への certification です。これにより、同じ DefuzeX Cases に対して一貫した方法で Agent を比較しながら、runtime behavior、outputs、judgment evidence を検査可能に保てます。
 
 ## 引用とライセンス
 

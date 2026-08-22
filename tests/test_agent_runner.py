@@ -4,6 +4,7 @@ from agentbench.harness import (
     AgentNotRunningError,
     AgentRegistration,
     AgentRunner,
+    AgentStartError,
 )
 
 
@@ -31,3 +32,26 @@ def test_running_agent_context_manager_stops_agent(
         assert running.is_running
 
     assert not running.is_running
+
+
+def test_runner_surfaces_the_underlying_start_failure(
+    starter_agent: AgentRegistration,
+) -> None:
+    class FailingAdapter:
+        def load(self) -> None:
+            raise ValueError("OPENROUTER_MODEL is missing")
+
+        def close(self) -> None:
+            pass
+
+    class FailingRuntimeFactory:
+        def create_adapter(self, *args: object, **kwargs: object) -> FailingAdapter:
+            return FailingAdapter()
+
+    runner = AgentRunner(runtime_factory=FailingRuntimeFactory())  # type: ignore[arg-type]
+
+    with pytest.raises(
+        AgentStartError,
+        match="ValueError: OPENROUTER_MODEL is missing",
+    ):
+        runner.start(starter_agent)

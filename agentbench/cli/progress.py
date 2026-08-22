@@ -9,6 +9,7 @@ from threading import Event, Lock, Thread
 
 from agentbench.harness.progress import BenchmarkProgress
 
+from .TerminalUI import LLMActivity
 from .constants import ANSI_GREEN, ANSI_RED, ANSI_RESET, ANSI_YELLOW
 
 DOT_FRAMES = (".  ", ".. ", "...")
@@ -22,10 +23,12 @@ class ProgressPrinter:
         self,
         output_fn: Callable[[str], None] = print,
         *,
+        llm_activity: LLMActivity | None = None,
         live_updates: bool | None = None,
         animation_interval: float = ANIMATION_INTERVAL_SECONDS,
     ) -> None:
         self._output_fn = output_fn
+        self._llm_activity = llm_activity
         self._active_label: str | None = None
         self._animation_interval = animation_interval
         self._stop_animation = Event()
@@ -48,6 +51,9 @@ class ProgressPrinter:
         self._finish_stage(f"{color}{status}{ANSI_RESET}{suffix}")
 
     def _start_stage(self, label: str) -> None:
+        if self._llm_activity is not None:
+            self._llm_activity.start_stage(label)
+            return
         if not self._live_updates:
             self._output_fn(label)
             return
@@ -63,6 +69,9 @@ class ProgressPrinter:
         self._animation_thread.start()
 
     def _finish_stage(self, status: str) -> None:
+        if self._llm_activity is not None:
+            self._llm_activity.finish_stage(status)
+            return
         if not self._live_updates:
             self._output_fn(f"  {status}")
             return
@@ -95,6 +104,14 @@ class ProgressPrinter:
         self._stop_animation.set()
         self._animation_thread.join(timeout=self._animation_interval + 0.1)
         self._animation_thread = None
+
+    def close(self) -> None:
+        """Stop any live renderer left active by an interrupted run."""
+
+        if self._llm_activity is not None:
+            self._llm_activity.close()
+            return
+        self._stop_active_animation()
 
 
 def configuration_error(message: object) -> str:
