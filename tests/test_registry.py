@@ -21,6 +21,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
             "adapting",
             1,
         ),
+        (
+            "trading-agents",
+            "06-trading-agents",
+            True,
+            "adapting",
+            1,
+        ),
     ],
 )
 def test_registry_resolves_registered_agents(
@@ -57,6 +64,7 @@ def test_ready_agents_are_the_default_runnable_subset() -> None:
     assert {agent.agent_id for agent in registry.ready()} == {"swe-agent"}
     assert {agent.agent_id for agent in registry.enabled_with_status("adapting")} == {
         "langgraph-customer-support-agent",
+        "trading-agents",
     }
 
 
