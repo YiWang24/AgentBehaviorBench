@@ -1011,3 +1011,71 @@ class TestTerminalEnumChoice:
         assert json.loads(body["choices"][0]["message"]["content"]) == {
             "next_action": "yes"
         }
+
+
+class TestLabelledPromptSchema:
+    """Agents that label the schema with `[OUTPUT_SCHEMA]` and a bare JSON
+    object (rather than LangChain's fenced sentinel) should still get an
+    instance of that schema, not the schema echoed back."""
+
+    def _payload(self, prompt: str) -> dict:
+        return {
+            "model": "gpt-4o",
+            "response_format": {"type": "json_object"},
+            "messages": [{"role": "user", "content": prompt}],
+        }
+
+    def test_output_schema_marker_yields_an_instance(self):
+        prompt = (
+            "Return valid JSON strictly matching the schema.\n\n"
+            "[OUTPUT_SCHEMA]\n"
+            '{"type": "object", "properties": {"title": {"type": "string"}, '
+            '"count": {"type": "integer"}}, "required": ["title", "count"]}\n'
+        )
+        reply = json.loads(_reply(self._payload(prompt))["choices"][0]["message"]["content"])
+        # An instance has the declared keys with typed placeholder values, not
+        # the schema's own keys ("type"/"properties").
+        assert set(reply) == {"title", "count"}
+        assert isinstance(reply["count"], int)
+
+    def test_defs_and_ref_schema_is_resolved(self):
+        prompt = (
+            "[output schema]\n"
+            '{"$defs": {"Item": {"type": "object", "properties": '
+            '{"name": {"type": "string"}}, "required": ["name"]}}, '
+            '"type": "object", "properties": {"item": {"$ref": "#/$defs/Item"}}, '
+            '"required": ["item"]}'
+        )
+        reply = json.loads(_reply(self._payload(prompt))["choices"][0]["message"]["content"])
+        assert "item" in reply
+        assert isinstance(reply["item"], dict)
+        assert "name" in reply["item"]
+
+    def test_plain_json_object_without_schema_marker_is_unaffected(self):
+        # A prompt that merely contains a JSON example, no schema marker, still
+        # goes through the example path and is returned as written.
+        prompt = 'Reply in json like {"answer": "yes", "why": "because"}'
+        reply = json.loads(_reply(self._payload(prompt))["choices"][0]["message"]["content"])
+        assert reply == {"answer": "yes", "why": "because"}
+
+
+class TestPhraseLabelledSchema:
+    """A schema introduced by a phrase ending in a colon (`JSON schema: {...}`)
+    is recognised the same as a bracketed marker."""
+
+    def test_json_schema_colon_yields_an_instance(self):
+        prompt = (
+            "You are a strict JSON generator. Return only one valid JSON object. "
+            'JSON schema: {"type": "object", "properties": '
+            '{"verdict": {"type": "string"}, "score": {"type": "number"}}, '
+            '"required": ["verdict", "score"]}'
+        )
+        payload = {
+            "model": "gpt-4o",
+            "response_format": {"type": "json_object"},
+            "messages": [{"role": "system", "content": prompt},
+                         {"role": "user", "content": "assess this"}],
+        }
+        reply = json.loads(_reply(payload)["choices"][0]["message"]["content"])
+        assert set(reply) == {"verdict", "score"}
+        assert isinstance(reply["score"], (int, float))

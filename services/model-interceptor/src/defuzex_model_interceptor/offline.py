@@ -321,14 +321,42 @@ def _prompt_schema(payload: Mapping[str, Any]) -> dict[str, Any] | None:
     """
 
     text = _prompt_text(payload)
+
+    # Two shapes are recognised. LangChain's parsers emit the fixed
+    # `_SCHEMA_SENTINEL` sentence followed by a fenced block. Other agents label
+    # the schema with a bracketed marker such as `[OUTPUT_SCHEMA]` and follow it
+    # with a bare JSON object. In both cases the schema object appears right
+    # after the marker, so it can be recovered exactly rather than guessed.
     marker = text.rfind(_SCHEMA_SENTINEL)
-    if marker == -1:
-        return None
-    fenced = _FENCED_JSON.search(text, marker)
-    if fenced is None:
-        return None
+    if marker != -1:
+        fenced = _FENCED_JSON.search(text, marker)
+        if fenced is not None:
+            schema = _load_schema(fenced.group(1))
+            if schema is not None:
+                return schema
+
+    label = _SCHEMA_LABEL.search(text)
+    if label is not None:
+        for start, obj in _json_objects(text[label.end():]):
+            if isinstance(obj.get("properties"), dict) or "$defs" in obj or "$ref" in obj:
+                return obj
+
+    return None
+
+
+# A schema block is often introduced by a short label — either bracketed
+# (`[OUTPUT_SCHEMA]`) or a phrase ending in a colon (`JSON schema:`). Either way
+# the schema object follows immediately, so the marker just locates it.
+_SCHEMA_LABEL = re.compile(
+    r"(?:\[\s*(?:output[_ ]?schema|json[_ ]?schema|response[_ ]?schema|schema)\s*\]"
+    r"|(?:output[_ ]?schema|json[_ ]?schema|response[_ ]?schema)\s*[:：])",
+    re.IGNORECASE,
+)
+
+
+def _load_schema(raw: str) -> dict[str, Any] | None:
     try:
-        schema = json.loads(fenced.group(1))
+        schema = json.loads(raw)
     except json.JSONDecodeError:
         return None
     if isinstance(schema, dict) and isinstance(schema.get("properties"), dict):
@@ -352,6 +380,14 @@ def _structured_content(payload: Mapping[str, Any]) -> str | None:
         # the request alone cannot describe the shape. The prompt is then the
         # only place the Agent stated its contract; an empty object parses but
         # is missing every field the Agent is about to read.
+        #
+        # A schema stated in the prompt (`[OUTPUT_SCHEMA]`, a fenced LangChain
+        # block) is preferred over a bare example, and is synthesised into an
+        # *instance* — returning the schema object verbatim would hand the
+        # Agent its own contract instead of a value matching it.
+        prompt_schema = _prompt_schema(payload)
+        if prompt_schema is not None:
+            return json.dumps(_arguments_for(prompt_schema), ensure_ascii=False)
         example = _prompt_example(payload, require_free_turn=False)
         if example is not None:
             return json.dumps(example, ensure_ascii=False)
