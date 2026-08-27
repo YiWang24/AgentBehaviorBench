@@ -66,10 +66,12 @@ def load_authentication() -> dict[str, AuthenticationPlugin]:
 
 
 def load_targets() -> dict[str, TargetProviderPlugin]:
+    from .offline import OFFLINE_MOCK_TARGET
     from .targets import OPENROUTER_TARGET
 
     plugins: dict[str, TargetProviderPlugin] = {
         OPENROUTER_TARGET.name: OPENROUTER_TARGET,
+        OFFLINE_MOCK_TARGET.name: OFFLINE_MOCK_TARGET,
     }
     return _load(TARGET_GROUP, plugins)
 

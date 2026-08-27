@@ -44,7 +44,12 @@ Current subcommands:
 | --- | --- |
 | `run` | Run all enabled Agents whose status is `ready`. |
 | `view` | Open an existing JSONL result in the local web viewer. |
+| `verify` | Check offline that one Agent starts and its model traffic is captured. Uses no credentials and no network. |
 | `certify` | Verify one `adapting` Agent can complete its requested Cases and promote it to `ready`. |
+
+`verify` is the only command that runs without `DEFUZEX_API_KEY`, without
+`OPENROUTER_API_KEY`, and without network access. Use it while adapting an Agent,
+before `certify`.
 
 ## 2. Default Command and Compatibility
 
@@ -174,9 +179,91 @@ Viewer action? [r rerun/q quit]:
 
 `Ctrl+C` or end-of-input also stops the viewer.
 
-## 4. `certify`
+## 4. `verify`
 
-### 4.1 Syntax
+### 4.1 What It Answers
+
+`verify` answers one question: **does this Agent start, respond, and is its model
+traffic observable?** It does not measure benchmark quality and it does not change
+the Registry.
+
+The whole run is hermetic:
+
+- no `DEFUZEX_API_KEY` and no `OPENROUTER_API_KEY` are read;
+- the DefuzeX SDK is never imported;
+- the container network is created with `--internal`, so nothing reaches the
+  internet;
+- model replies are generated inside the Model Interceptor by the `offline-mock`
+  target, synthesized from whatever tools or response format the request declares;
+- results go to a temporary file that is deleted unless `--keep-artifacts` is given.
+
+### 4.2 Syntax
+
+```text
+agentbench verify [-h] [--env-file PATH] [--input TEXT] [--inputs N]
+                  [--keep-artifacts] [--llm-trace {off,terminal}]
+                  [--llm-trace-max-bytes BYTES] agent_id
+```
+
+```powershell
+python -m agentbench verify langgraph-customer-support-agent
+python -m agentbench verify swe-agent --inputs 3 --llm-trace terminal
+python -m agentbench verify swe-agent --input "@prompts\probe.txt" --keep-artifacts
+```
+
+### 4.3 Arguments
+
+| Argument | Required | Default | Description |
+| --- | --- | --- | --- |
+| `agent_id` | Yes | - | Registered Agent ID. Disabled Agents and any `status` are accepted. |
+| `--env-file PATH` | No | Repository `.env` | Load host defaults from another dotenv file. |
+| `--input TEXT` | No | Short generic prompt | Probe text, or `@PATH` to read it from a file. |
+| `--inputs N` | No | `1` | Number of probe inputs sent in the single Case. |
+| `--keep-artifacts` | No | Delete | Keep the temporary result log and print its path. |
+| `--llm-trace {off,terminal}` | No | `off` | Print the sanitized captured model requests and responses. |
+| `--llm-trace-max-bytes BYTES` | No | `262144` | Maximum displayed bytes per request or response. |
+| `-h`, `--help` | No | - | Show `verify` help and exit. |
+
+Unlike `run` and `certify`, `verify` always runs exactly **one** Case regardless of
+the Agent's `case` field, because it checks startup rather than coverage.
+
+### 4.4 Agent Requirements
+
+| Condition | Behavior |
+| --- | --- |
+| `runtime.type = "docker"` and an `[llm_interception]` section | Verification runs. |
+| Any other runtime type | Refuse and exit `2`; no interceptor can observe an in-process Agent. |
+| No `[llm_interception]` section | Refuse and exit `2`; model calls could be neither captured nor served offline. |
+| Not registered | Refuse and exit `2`. |
+
+Secrets declared in `runtime.secret_env_keys` do not need real values. Missing ones
+are replaced with deterministic placeholders and the substituted names are printed,
+so a stubbed secret never passes silently.
+
+### 4.5 Verdict
+
+Verification passes when all of the following hold:
+
+- the Agent image builds and the container starts;
+- every probe input is invoked without a startup, runtime, or invocation error;
+- at least one complete `llm_request`/`llm_response` pair is captured.
+
+```text
+Captured LLM request/response pairs: 3
+Verification PASSED. Agent 'swe-agent' starts, responds, and its model traffic is fully captured.
+```
+
+A Judge-style report status is irrelevant here. An Agent whose reply is poor still
+passes verification, because the adapter and runtime are what is under test.
+
+```text
+Captured LLM request/response pairs: 0
+Verification FAILED. Agent 'swe-agent' ran but no model call was captured, so its LLM traffic is not observable.
+```
+
+## 5. `certify`
+
+### 5.1 Syntax
 
 ```text
 agentbench certify [-h] [--env-file PATH] [--output PATH]
@@ -191,7 +278,7 @@ Most common invocation:
 python -m agentbench certify swe-agent
 ```
 
-### 4.2 Arguments
+### 5.2 Arguments
 
 | Argument | Required | Default | Description |
 | --- | --- | --- | --- |
@@ -217,7 +304,7 @@ python -m agentbench certify swe-agent `
   --output results\manual-swe-certification.json
 ```
 
-### 4.3 Allowed Registry States
+### 5.3 Allowed Registry States
 
 `certify` operates on one specified Agent only and does not run other Agents.
 
@@ -229,7 +316,7 @@ python -m agentbench certify swe-agent `
 | `enabled = false` | Refuse certification and exit with code `2`. |
 | Not registered | Refuse certification and exit with code `2`. |
 
-### 4.4 Full Certification Flow
+### 5.4 Full Certification Flow
 
 Certification uses the same trusted host flow as normal benchmarks:
 
@@ -259,7 +346,7 @@ The status update modifies only the target Agent's `status` line and preserves
 field order, comments, and other Agents in the Registry. The temporary file is
 created beside the Registry and is atomically replaced when complete.
 
-### 4.5 Why Certification Does Not Keep a Viewer Running
+### 5.5 Why Certification Does Not Keep a Viewer Running
 
 `certify` is designed to be callable by developers and CI in non-interactive
 contexts. It does not wait for `q` or `r` after completion, and it does not
@@ -273,9 +360,9 @@ python -m agentbench view `
   results\certify-swe-agent-20260820-162500.jsonl
 ```
 
-## 5. `view`
+## 6. `view`
 
-### 5.1 Syntax
+### 6.1 Syntax
 
 ```text
 agentbench view [-h] [--host HOST] [--port PORT] result_log
@@ -285,7 +372,7 @@ agentbench view [-h] [--host HOST] [--port PORT] result_log
 python -m agentbench view results\result-20260820-162500.jsonl
 ```
 
-### 5.2 Arguments
+### 6.2 Arguments
 
 | Argument | Required | Default | Description |
 | --- | --- | --- | --- |
@@ -316,7 +403,7 @@ Result log: <absolute-path>\result-20260820-162500.jsonl
 Press `Ctrl+C` to stop the server. A missing result path raises an error
 immediately and does not create an empty file.
 
-## 6. JSONL Results and Interruption Recovery
+## 7. JSONL Results and Interruption Recovery
 
 Result files are append-only event streams and may contain:
 
@@ -337,22 +424,25 @@ and errors remain viewable.
 Results may contain inputs, outputs, raw adapter state, and error messages.
 Review result files for sensitive data before sharing or submitting them.
 
-## 7. Exit Codes
+## 8. Exit Codes
 
 | Exit code | Commands | Meaning |
 | --- | --- | --- |
 | `0` | `run` | User cancelled, or all selected benchmarks passed. |
+| `0` | `verify` | The Agent started, answered every probe, and its model traffic was captured. |
 | `0` | `certify` | Certification completed and promoted the Agent, completed with Judge failures but still promoted, or the Agent was already `ready`. |
 | `0` | `view` | Viewer stopped normally. |
 | `1` | `run` | No runnable ready Agents, shared configuration failed, or at least one benchmark failed. |
+| `1` | `verify` | The Agent failed to start or complete a probe, or no model call was captured. |
 | `1` | `certify` | Certification did not complete because of shared configuration, startup, runtime, or invocation failure. |
+| `2` | `verify` | Agent does not exist, does not use the Docker runtime, declares no `[llm_interception]`, or `--inputs` was below 1. |
 | `2` | `certify` | Agent does not exist, is disabled, has a disallowed state, or Registry update failed after certification completed. |
 | `2` | all commands | `argparse` detected an unknown command, unknown argument, or missing required argument. |
 
 Unhandled exceptions that are not converted by the CLI, such as a missing file
 for `view`, usually exit Python with a non-zero status and print the exception.
 
-## 8. FAQ
+## 9. FAQ
 
 ### Normal run did not generate JSONL or trace output
 
@@ -400,7 +490,7 @@ command, and `agent.toml`. AgentBench uses a read-only root filesystem and
 mounts `/tmp` as a fresh writable tmpfs for each run. See
 `How To Add Agent.md` for the full adaptation constraints.
 
-## 9. CLI Development Structure
+## 10. CLI Development Structure
 
 The CLI uses an explicit feature registry instead of hard-coding command
 branches in the root entry point:
@@ -412,14 +502,26 @@ agentbench/cli/
   presentation.py         terminal display and interaction
   registry_status.py      Registry status updates
   result_export.py        append-only JSONL writer
+  trace_runtime.py        runner wiring for live provider traffic
+  offline_runtime.py      runner wiring for credential-free offline runs
   viewer.py               local HTTP viewer server
   features/
     base.py               CommandFeature contract
     __init__.py           FEATURES registry
     run.py                run arguments and workflow
     view.py               view arguments and workflow
+    verify.py             verify arguments and workflow
     certify.py            certify arguments and workflow
+
+agentbench/harness/offline/
+  run.py                  local SDK Run, probe inputs, and startup report
+  suite.py                suite runner that pins the local provider pair
+  secrets.py              placeholder secret resolution for offline runs
 ```
+
+The offline path deliberately keeps `execution.py` untouched: provider arguments
+are injected by `OfflineSuiteRunner` instead of widening the shared execution
+signature.
 
 When adding a subcommand:
 

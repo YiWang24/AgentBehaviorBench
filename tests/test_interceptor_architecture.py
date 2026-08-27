@@ -58,6 +58,30 @@ def test_interceptor_has_an_independent_mitmproxy_service() -> None:
     assert "defuzex.model_interceptor.targets" in metadata["project"]["entry-points"]
 
 
+def test_offline_target_is_declared_as_an_installable_entry_point() -> None:
+    metadata = tomllib.loads(
+        INTERCEPTOR_CONTEXT.joinpath("pyproject.toml").read_text(encoding="utf-8")
+    )
+    targets = metadata["project"]["entry-points"]["defuzex.model_interceptor.targets"]
+
+    assert targets["offline-mock"] == (
+        "defuzex_model_interceptor.offline:OFFLINE_MOCK_TARGET"
+    )
+
+
+def test_offline_responder_runs_after_the_main_addon() -> None:
+    """Ordering is load-bearing: the main addon must open the trace pair and
+    authorize the call before the responder short-circuits the flow."""
+
+    source = INTERCEPTOR_SRC.joinpath(
+        "defuzex_model_interceptor", "loader.py"
+    ).read_text(encoding="utf-8")
+
+    assert source.index("ModelInterceptorAddon(_config)") < source.index(
+        "OfflineResponderAddon("
+    )
+
+
 def test_interceptor_image_build_is_scoped_to_service_context() -> None:
     builder = RecordingImageBuilder()
     provider = LocalInterceptorImageProvider(builder, INTERCEPTOR_CONTEXT)  # type: ignore[arg-type]
