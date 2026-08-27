@@ -249,7 +249,7 @@ def _placeholder(
         return OFFLINE_TEXT
     choices = field.get("enum")
     if isinstance(choices, list) and choices:
-        return choices[0]
+        return _terminal_choice(choices)
 
     # Optional fields arrive as anyOf[..., {"type": "null"}]; answer the first
     # branch that is not null rather than treating the field as untyped.
@@ -356,6 +356,46 @@ def _structured_content(payload: Mapping[str, Any]) -> str | None:
         if example is not None:
             return json.dumps(example, ensure_ascii=False)
     return json.dumps(_arguments_for(schema), ensure_ascii=False)
+
+
+# Words an Agent uses for the branch that ends a run. Matched on the value with
+# separators removed, so "final_report", "FINISH" and "__end__" all count.
+_TERMINAL_CHOICES = frozenset(
+    {
+        "complete",
+        "completed",
+        "done",
+        "end",
+        "exit",
+        "final",
+        "finalanswer",
+        "finalreport",
+        "finish",
+        "finished",
+        "stop",
+        "terminate",
+    }
+)
+
+
+def _terminal_choice(choices: list[Any]) -> Any:
+    """Pick the enum value that lets the Agent stop, else the first.
+
+    Routing enums are the common case — a supervisor asked which worker acts
+    next, with one branch meaning "we are done". Answering with the first value
+    sends every offline run around the same loop until it hits the recursion
+    limit, which reads as an Agent defect and is really an artefact of a mock
+    that cannot decide anything. The offline reply is not a judgement about the
+    work; it only has to let the Agent finish, so a terminal branch is taken
+    when the Agent offers one.
+    """
+
+    for choice in choices:
+        if not isinstance(choice, str):
+            continue
+        if re.sub(r"[^a-z0-9]", "", choice.lower()) in _TERMINAL_CHOICES:
+            return choice
+    return choices[0]
 
 
 def _json_objects(text: str) -> list[tuple[int, dict[str, Any]]]:

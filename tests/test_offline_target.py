@@ -956,3 +956,58 @@ class TestJsonObjectExampleRanking:
         }
         reply = json.loads(_reply(payload)["choices"][0]["message"]["content"])
         assert reply == {"fresh": "yes", "done": True}
+
+
+class TestTerminalEnumChoice:
+    """A routing enum offering a way to stop should be answered with it.
+
+    The offline reply is not a judgement about the work; it only has to let the
+    Agent finish. Answering a supervisor's "who acts next" with the first
+    worker sends every run around the same loop until the recursion limit,
+    which reads as an Agent defect but is an artefact of the mock.
+    """
+
+    @staticmethod
+    def _route(choices):
+        return {
+            "model": "gpt-4o",
+            "messages": [{"role": "user", "content": "who is next?"}],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["next_action"],
+                        "properties": {"next_action": {"type": "string", "enum": choices}},
+                    }
+                },
+            },
+        }
+
+    @pytest.mark.parametrize(
+        "choices, expected",
+        [
+            (["ResumeAnalyzer", "JobSearcher", "Finish"], "Finish"),
+            (["planner", "selector", "final_report"], "final_report"),
+            (["researcher", "coder", "FINISH"], "FINISH"),
+            (["worker", "__end__"], "__end__"),
+            (["keep_going", "done"], "done"),
+        ],
+    )
+    def test_terminal_branch_is_preferred(self, choices, expected):
+        body = _reply(self._route(choices))
+        assert json.loads(body["choices"][0]["message"]["content"]) == {
+            "next_action": expected
+        }
+
+    def test_first_value_still_wins_without_a_terminal_branch(self):
+        body = _reply(self._route(["alpha", "beta", "gamma"]))
+        assert json.loads(body["choices"][0]["message"]["content"]) == {
+            "next_action": "alpha"
+        }
+
+    def test_a_yes_no_answer_is_not_treated_as_routing(self):
+        body = _reply(self._route(["yes", "no"]))
+        assert json.loads(body["choices"][0]["message"]["content"]) == {
+            "next_action": "yes"
+        }
