@@ -183,3 +183,12 @@ status = "adapting"
 framework = "langgraph"
 source = "https://github.com/Fullive-AI/Anima"
 case = 1
+
+[[agents]]
+agent_id = "graph-websearch-agent"
+path = "resources/agents/21-graph-websearch-agent"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/john-adeojo/graph_websearch_agent"
+case = 1

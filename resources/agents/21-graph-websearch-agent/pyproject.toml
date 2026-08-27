@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "graph-websearch-agent-benchmark"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    # Upstream pins langgraph 0.0.64 / langchain-core 0.2.4. Those predate the
+    # current interceptor's expectations and no longer resolve cleanly on
+    # 3.12, so the 0.2/0.3 line is used instead — create_graph only needs
+    # StateGraph, END and a checkpointer.
+    "langgraph>=0.2,<1",
+    "langgraph-checkpoint-sqlite>=1.0",
+    "langchain-core>=0.3,<1",
+    "langchain-community>=0.3,<1",
+    "langchain-openai>=0.2,<1",
+    "beautifulsoup4>=4.12",
+    "termcolor>=2.4",
+    "pyyaml>=6.0",
+    # chainlit is the chat UI and is not the entry point.
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+config = ["*.yaml"]

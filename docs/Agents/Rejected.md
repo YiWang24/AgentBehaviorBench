@@ -359,6 +359,11 @@ Reason: No `StateGraph` construction and no graph factory exists outside tests,
 Evidence (repository @ reviewed revision):
   - ShenSeanChen/waku-agent @ 680f64a
   - test-zeus-ai/testzeus-hercules @ fa2b469 (also AGPL-3.0, see Copyleft)
+  - stophobia/deerflow2.0-enhanced @ 814bde3 — a deer-flow derivative carrying
+    the same restructure: `backend/pyproject.toml` declares `langgraph-sdk`
+    but not `langgraph`, and `grep -rn "StateGraph("` matches nothing in the
+    repository. `backend/langgraph.json` names graphs that are hosted
+    elsewhere. Same reason as bytedance/deer-flow above.
   Checked: `grep -rn "StateGraph(" --include='*.py'` and a search for
   `build_graph` / `get_graph` / `make_graph` definitions outside `tests/`.
 Reconsider when: a revision is pinned in which the graph is defined in the
