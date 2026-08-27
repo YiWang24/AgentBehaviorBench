@@ -114,10 +114,34 @@ def test_offline_secret_resolver_prefers_real_values() -> None:
 def test_offline_secret_resolver_substitutes_and_records_missing_values() -> None:
     resolver = OfflineSecretResolver({"BLANK": "   "})
 
-    assert resolver.require("MISSING").startswith(PLACEHOLDER_PREFIX)
-    assert resolver.require("BLANK").startswith(PLACEHOLDER_PREFIX)
-    assert resolver.require("MISSING").startswith(PLACEHOLDER_PREFIX)
+    # The marker is embedded rather than leading: placeholders carry the
+    # prefix of the credential family they replace, so agents that validate
+    # key shape accept them.
+    assert PLACEHOLDER_PREFIX in resolver.require("MISSING")
+    assert PLACEHOLDER_PREFIX in resolver.require("BLANK")
+    assert PLACEHOLDER_PREFIX in resolver.require("MISSING")
     assert resolver.substituted == ("MISSING", "BLANK")
+
+
+def test_offline_placeholders_are_shaped_like_the_credential_they_replace() -> None:
+    """Agents guard on key shape; a placeholder that fails the guard reports a
+    configuration error the deployment does not have."""
+
+    resolver = OfflineSecretResolver({})
+
+    openai_key = resolver.require("OPENAI_API_KEY")
+    assert openai_key.startswith("sk-")
+    assert PLACEHOLDER_PREFIX in openai_key
+
+    anthropic_key = resolver.require("ANTHROPIC_API_KEY")
+    assert anthropic_key.startswith("sk-ant-api03-")
+    # sk-ant- keys also satisfy the looser sk- guard.
+    assert anthropic_key.startswith("sk-")
+
+    # A non-key secret still gets an identifiable placeholder.
+    other = resolver.require("SOME_ENDPOINT")
+    assert PLACEHOLDER_PREFIX in other
+    assert "some_endpoint" in other
 
 
 def test_offline_suite_runner_forces_local_providers_and_drops_the_api_key(
