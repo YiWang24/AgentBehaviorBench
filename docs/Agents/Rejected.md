@@ -226,6 +226,33 @@ Reconsider when: upstream type-guards the join in `synthesize_response`, or
   fixing the agent's own logic rather than adapting a benchmark boundary.
 ```
 
+```text
+Agent rejected: Y-Research-SBU/TimeSeriesScientist
+Requirement: R10
+Reason code: VALIDATION_FAILED
+Reason: The graph cannot get past its first node. `_preprocess_node` calls
+  `self.preprocess_agent.run(state["validation_data"])` with no output
+  directory; `run` defaults `output_dir` to `None` and passes it straight to
+  `process`, which reaches `Path(output_dir)` unconditionally and raises
+  `TypeError: argument should be a str or an os.PathLike object ... not
+  'NoneType'`. Visualisation is not gated by configuration, so there is no
+  setting that avoids the call, and `_preprocess_node` is the only route into
+  that agent.
+Evidence:
+  - Reviewed revision: 41b3963
+  - `time_series_agent/graph/agent_graph.py:52` — the one-argument call.
+  - `time_series_agent/agents/preprocess_agent.py:186` — `output_dir: str = None`.
+  - `time_series_agent/agents/preprocess_agent.py:650` and `:966` —
+    `Path(output_dir)` with no guard.
+  - The adaptation itself was sound: the image builds with `libgomp1` for
+    LightGBM and XGBoost, langchain pinned to the 0.3 line the project targets,
+    all five nodes compile, and a deterministic 240-point series slices cleanly
+    into 168 validation and 24 test rows. Only the upstream defect stops it.
+Reconsider when: upstream passes an output directory from the node, or guards
+  the visualisation call. Supplying one here would mean editing the agent
+  rather than adapting a benchmark boundary.
+```
+
 ---
 
 ## Privileged execution
