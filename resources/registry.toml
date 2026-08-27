@@ -201,3 +201,12 @@ status = "adapting"
 framework = "langgraph"
 source = "https://github.com/amanv1906/GENAI-CareerAssistant-Multiagent"
 case = 1
+
+[[agents]]
+agent_id = "podcast-writer"
+path = "resources/agents/23-podcast-writer"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/artnoage/Podcast"
+case = 1
