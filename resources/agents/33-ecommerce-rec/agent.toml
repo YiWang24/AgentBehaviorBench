@@ -1,0 +1,58 @@
+schema_version = "defuzex-bench.agent.v2"
+agent_id = "ecommerce-rec"
+display_name = "E-Commerce Recommendation Pipeline"
+framework = "langgraph"
+
+[source]
+url = "https://github.com/bcefghj/multi-agent-ecommerce-system"
+revision = "faf0fd8"
+license = "MIT"
+
+[build]
+context = "."
+dockerfile = "Dockerfile"
+
+[launch]
+argv = ["python", "-m", "ecom_benchmark.worker"]
+input_mode = "jsonl"
+output_format = "jsonl"
+workdir = "/opt/agent"
+
+[runtime]
+type = "docker"
+timeout_sec = 240
+env_keys = []
+secret_env_keys = []
+
+[llm_interception]
+required = true
+trust_plugin = "pem-env"
+
+[llm_interception.environment]
+# The agents talk to MiniMax's OpenAI-compatible endpoint. It speaks the OpenAI
+# chat wire protocol, so the openai-chat plugin captures it.
+ECOM_LLM_BASE_URL = "https://api.minimax.chat/v1"
+ECOM_LLM_MODEL = "MiniMax-M1"
+ECOM_NUM_ITEMS = "5"
+
+[[llm_interception.credentials]]
+id = "primary"
+agent_env = "ECOM_LLM_API_KEY"
+auth_plugin = "bearer-token"
+
+[[llm_interception.routes]]
+id = "minimax-chat"
+host_patterns = ["api.minimax.chat"]
+ports = [443]
+methods = ["POST"]
+path_patterns = ["/v1/chat/completions", "/v1/text/chatcompletion_v2"]
+protocol_plugin = "openai-chat"
+credential = "primary"
+
+[adapter]
+type = "langgraph"
+mode = "in_process"
+config = "langgraph.json"
+graph_id = "ecommerce_rec"
+input_key = "user_id"
+output_key = "final_products"

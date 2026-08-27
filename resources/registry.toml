@@ -291,3 +291,12 @@ status = "adapting"
 framework = "langgraph"
 source = "https://github.com/muratcankoylan/readwren"
 case = 1
+
+[[agents]]
+agent_id = "ecommerce-rec"
+path = "resources/agents/33-ecommerce-rec"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/bcefghj/multi-agent-ecommerce-system"
+case = 1
