@@ -300,3 +300,12 @@ status = "adapting"
 framework = "langgraph"
 source = "https://github.com/bcefghj/multi-agent-ecommerce-system"
 case = 1
+
+[[agents]]
+agent_id = "mcube-patent-draft"
+path = "resources/agents/34-mcube-patent-draft"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/yycyyv/M-Cube"
+case = 1
