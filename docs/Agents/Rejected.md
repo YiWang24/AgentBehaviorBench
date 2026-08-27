@@ -145,6 +145,10 @@ Evidence (repository @ reviewed revision):
   - didilili/deepsearch-agents @ d0f6eed
   - kaymen99/personal-ai-assistant @ c96fefb
   - GU-Cryptography/anykb @ aa7c02e
+  - hwchase17/autoresearch-agents @ 552fd6a
+  - bamboo-moon/zhisaotong-Agent @ 92569e6
+  - Neon549/Alpha_stock @ 1abf660
+  - shodan1q/zeroapp @ e081199
   Checked in each case: `licen[cs]e*` in the repository root, a licence
   statement in README.md, and `project.license` / licence classifiers in
   pyproject.toml.
@@ -376,6 +380,8 @@ Reason: No `StateGraph` construction and no graph factory exists outside tests,
 Evidence (repository @ reviewed revision):
   - ShenSeanChen/waku-agent @ 680f64a
   - test-zeus-ai/testzeus-hercules @ fa2b469 (also AGPL-3.0, see Copyleft)
+  - EricHong123/B-agent @ 4e449f2 — no `StateGraph` construction anywhere.
+  - waseens/deep-search-pro @ 678c55c — no `StateGraph` construction anywhere.
   - Yourdaylight/stock_datasource @ f180446 — a data platform, not an agent.
     `langgraph` appears only as a string in a runtime-selector column
     (`agent_config_service.py`) and in a demo's module-mocking list; no
