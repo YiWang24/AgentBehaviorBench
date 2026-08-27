@@ -276,6 +276,35 @@ Reconsider when: upstream passes an output directory from the node, or guards
 
 ---
 
+## Non-redistributable licence
+
+R8 requires a licence under which vendoring a snapshot into this MIT repository
+is permitted. A source-available licence that forbids offering the software as
+a service is not redistributable on those terms.
+
+```text
+Agent rejected: EYamanS/texel-studio
+Requirement: R8
+Reason code: SOURCE_OR_LICENSE_MISSING
+Reason: Ships a custom "Texel Studio License" — source-available, permitting
+  self-hosting and modification but explicitly prohibiting offering the
+  software or a substantial derivative as a hosted service. That restriction is
+  incompatible with vendoring it into an MIT-licensed benchmark. Separately, the
+  agent generates images (sprites, tilesets) through Gemini image models rather
+  than producing text, so the offline text gate could not exercise it even if
+  the licence allowed (UNSUPPORTED_IO_CONTRACT / R1 model protocol also apply).
+Evidence:
+  - Reviewed revision: 8af1558
+  - LICENSE §3 "SERVICE RESTRICTION": "You may NOT offer this Software, or any
+    substantial derivative of it, as [a service]".
+  - agent.py builds a `create_react_agent` whose tools call Gemini image
+    generation; there is no text-only path.
+Reconsider when: upstream relicenses permissively, and AgentBench gains an
+  image-output contract and a Gemini interception route.
+```
+
+---
+
 ## Privileged execution
 
 ```text
