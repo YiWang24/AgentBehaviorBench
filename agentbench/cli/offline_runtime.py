@@ -78,39 +78,31 @@ def build_offline_runtime(
     # so the CLI can report how much model traffic verification actually observed.
     trace_state = InterceptionTraceState()
     call_recorder = CallRecorder()
-    sinks: list[TraceSink] = [trace_state, call_recorder]
-    if activity_sink is not None:
-        sinks.append(activity_sink)
-    if llm_trace == "terminal":
-        # Only route through the live panel when it actually owns the terminal.
-        # Otherwise its static path may be silenced, which would drop the trace
-        # the caller explicitly asked for.
-        sinks.append(TerminalTraceSink(_trace_output(activity_sink, output_fn)))
-
     # The offline target never contacts a provider, so its credential is synthetic.
     # Seeding it here keeps it out of the resolver's substituted-secret report,
     # which is reserved for genuinely missing Agent configuration.
     secret_resolver = OfflineSecretResolver(
         {**os.environ, OFFLINE_UPSTREAM_KEY_ENV: OFFLINE_UPSTREAM_KEY_VALUE}
     )
-    target = ModelTargetConfig(
-        provider_id=OFFLINE_PROVIDER_ID,
-        target_plugin=OFFLINE_TARGET_PLUGIN,
-        base_url=OFFLINE_BASE_URL,
-        model=(model or OFFLINE_MODEL).strip() or OFFLINE_MODEL,
-        credential_env=OFFLINE_UPSTREAM_KEY_ENV,
-    )
-    runtime_factory = RuntimeFactory(
-        docker_builder=lambda: DockerRuntime(
-            secret_resolver=secret_resolver,
-            model_provider=StaticModelTargetProvider(target),
-            trace_sink=_CompositeTraceSink(tuple(sinks)),
-            trace_max_bytes=llm_trace_max_bytes,
-            egress="blocked",
-        )
-    )
     benchmark_runner = BenchmarkRunner(
-        agent_runner=AgentRunner(runtime_factory=runtime_factory),
+        agent_runner=AgentRunner(
+            runtime_factory=RuntimeFactory(
+                docker_builder=_OfflineDockerBuilder(
+                    secret_resolver=secret_resolver,
+                    target=_offline_target(model),
+                    trace_sink=_CompositeTraceSink(
+                        _trace_sinks(
+                            trace_state,
+                            call_recorder,
+                            activity_sink=activity_sink,
+                            output_fn=output_fn,
+                            llm_trace=llm_trace,
+                        )
+                    ),
+                    trace_max_bytes=llm_trace_max_bytes,
+                )
+            )
+        ),
         # A local factory also stops BenchmarkRunner from importing the DefuzeX SDK.
         sdk_run_factory=OfflineRunFactory(probes=probes),
     )
@@ -125,6 +117,33 @@ def build_offline_runtime(
     )
 
 
+def _offline_target(model: str | None) -> ModelTargetConfig:
+    return ModelTargetConfig(
+        provider_id=OFFLINE_PROVIDER_ID,
+        target_plugin=OFFLINE_TARGET_PLUGIN,
+        base_url=OFFLINE_BASE_URL,
+        model=(model or OFFLINE_MODEL).strip() or OFFLINE_MODEL,
+        credential_env=OFFLINE_UPSTREAM_KEY_ENV,
+    )
+
+
+def _trace_sinks(
+    *required: TraceSink,
+    activity_sink: TraceSink | None,
+    output_fn: Callable[[str], None],
+    llm_trace: str,
+) -> tuple[TraceSink, ...]:
+    sinks = list(required)
+    if activity_sink is not None:
+        sinks.append(activity_sink)
+    if llm_trace == "terminal":
+        # Only route through the live panel when it actually owns the terminal.
+        # Otherwise its static path may be silenced, which would drop the trace
+        # the caller explicitly asked for.
+        sinks.append(TerminalTraceSink(_trace_output(activity_sink, output_fn)))
+    return tuple(sinks)
+
+
 def _trace_output(
     activity_sink: TraceSink | None, output_fn: Callable[[str], None]
 ) -> Callable[[str], None]:
@@ -134,10 +153,33 @@ def _trace_output(
     return output_fn
 
 
+@dataclass(frozen=True, slots=True)
+class _OfflineDockerBuilder:
+    """Build the isolated runtime while holding only what it needs.
+
+    A closure here would keep the whole of ``build_offline_runtime``'s scope alive
+    for as long as the factory does.
+    """
+
+    secret_resolver: OfflineSecretResolver
+    target: ModelTargetConfig
+    trace_sink: TraceSink
+    trace_max_bytes: int
+
+    def __call__(self) -> DockerRuntime:
+        return DockerRuntime(
+            secret_resolver=self.secret_resolver,
+            model_provider=StaticModelTargetProvider(self.target),
+            trace_sink=self.trace_sink,
+            trace_max_bytes=self.trace_max_bytes,
+            egress="blocked",
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class _CompositeTraceSink:
-    def __init__(self, sinks: tuple[TraceSink, ...]) -> None:
-        self._sinks = sinks
+    sinks: tuple[TraceSink, ...]
 
     def emit(self, event: TraceEvent) -> None:
-        for sink in self._sinks:
+        for sink in self.sinks:
             sink.emit(event)

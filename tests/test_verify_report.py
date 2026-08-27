@@ -310,6 +310,71 @@ def test_failed_stage_is_marked_and_remembered() -> None:
     assert progress.failed
 
 
+def test_a_long_request_still_yields_a_readable_preview() -> None:
+    """Capture must stay full-fidelity.
+
+    Truncating captured bytes to bound terminal verbosity leaves the body invalid
+    JSON, and preview extraction then falls back to dumping raw escaped text.
+    Bounding belongs in the sink that prints, not in what gets captured.
+    """
+
+    recorder = CallRecorder()
+    long_prompt = "You are a helpful assistant. " * 200
+
+    recorder.emit(
+        TraceEvent(
+            "llm_request",
+            {
+                "call_id": "call-1",
+                "provider": "offline",
+                "payload": {
+                    "messages": [
+                        {"role": "system", "content": long_prompt},
+                        {"role": "user", "content": "Reply with a confirmation."},
+                    ]
+                },
+            },
+        )
+    )
+    recorder.emit(
+        TraceEvent(
+            "llm_response",
+            {
+                "call_id": "call-1",
+                "status": 200,
+                "payload": {"choices": [{"message": {"content": "done"}}]},
+            },
+        )
+    )
+
+    assert recorder.records[0].request_preview == "Reply with a confirmation."
+    assert "\\" not in recorder.records[0].request_preview
+
+
+def test_terminal_trace_caps_only_what_it_prints() -> None:
+    output: list[str] = []
+    payload = {"messages": [{"content": "x" * 5000}]}
+
+    TerminalTraceSink(output.append, max_payload_chars=200).emit(
+        TraceEvent(
+            "llm_request",
+            {
+                "call_id": "call-1",
+                "route_id": "openai-chat",
+                "provider": "offline",
+                "method": "POST",
+                "host": "api.openai.com",
+                "path": "/v1/chat/completions",
+                "payload": payload,
+            },
+        )
+    )
+
+    rendered = output[-1]
+    assert len(rendered) < 400
+    assert "more characters" in rendered
+
+
 def test_terminal_trace_omits_a_source_identical_to_its_destination() -> None:
     """A target that answers the call itself never rewrites the address."""
 

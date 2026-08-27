@@ -86,9 +86,20 @@ class InterceptionTraceState:
             return True
 
 
+DEFAULT_TRACE_PAYLOAD_CHARS = 2000
+
+
 @dataclass(slots=True)
 class TerminalTraceSink:
+    """Print captured calls, bounding only what is shown.
+
+    Payloads are capped here rather than at capture time: the captured bytes also
+    feed preview extraction and the result log, and truncating them mid-JSON
+    would leave those unable to parse the body.
+    """
+
     output_fn: Callable[[str], None] = print
+    max_payload_chars: int = DEFAULT_TRACE_PAYLOAD_CHARS
 
     def emit(self, event: TraceEvent) -> None:
         if event.event == "interceptor_ready":
@@ -126,6 +137,13 @@ class TerminalTraceSink:
         if metadata:
             self.output_fn(json.dumps(metadata, ensure_ascii=False, sort_keys=True))
         if "payload" in data:
-            self.output_fn(
-                json.dumps(data["payload"], ensure_ascii=False, indent=2, sort_keys=True)
+            rendered = json.dumps(
+                data["payload"], ensure_ascii=False, indent=2, sort_keys=True
             )
+            if 0 < self.max_payload_chars < len(rendered):
+                omitted = len(rendered) - self.max_payload_chars
+                rendered = (
+                    f"{rendered[: self.max_payload_chars]}\n"
+                    f"... {omitted} more characters"
+                )
+            self.output_fn(rendered)

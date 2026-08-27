@@ -27,7 +27,6 @@ from .constants import (
 PANEL_WIDTH = AGENT_SEPARATOR_WIDTH
 PANEL_INNER_WIDTH = PANEL_WIDTH - 2
 ANSI_PATTERN = re.compile(r"\033\[[0-9;]*m")
-ELLIPSIS = "..."
 
 
 def confirm_agents(
@@ -241,26 +240,6 @@ def render_panel(title: str, lines: Sequence[str], color: str) -> list[str]:
         *(panel_line(line, width) for line in lines),
         panel_rule("", color, width),
     ]
-
-
-def elide(text: str, width: int) -> str:
-    """Shorten to ``width`` visible characters, dropping from the middle.
-
-    The middle is the least informative part of a long path or command, so both
-    the leading label and the trailing file name stay readable.
-    """
-
-    if width < 1:
-        return ""
-    visible = ANSI_PATTERN.sub("", text)
-    if len(visible) <= width:
-        return visible
-    if width <= len(ELLIPSIS):
-        return visible[:width]
-    remaining = width - len(ELLIPSIS)
-    head = (remaining + 1) // 2
-    tail = remaining - head
-    return visible[:head] + ELLIPSIS + (visible[len(visible) - tail :] if tail else "")
 
 
 def display_path(path: Path) -> str:

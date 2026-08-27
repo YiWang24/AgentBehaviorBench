@@ -14,7 +14,10 @@ from agentbench.harness import BenchmarkSuiteResult, SuiteAgentResult
 from agentbench.harness.offline import DEFAULT_PROBE_TEXT, probe_inputs
 from agentbench.harness.registry import AgentRegistration, load_registry
 from agentbench.runtime.agentcontainer import runtime_type
-from agentbench.runtime.interception import InterceptionConfig
+from agentbench.runtime.interception import (
+    DEFAULT_TRACE_MAX_BYTES,
+    InterceptionConfig,
+)
 
 from agentbench.cli.environment import load_project_environment
 from agentbench.cli.execution import BenchmarkExecution, run_benchmark_once
@@ -36,11 +39,6 @@ from .run import DEFAULT_REGISTRY_PATH
 DEFAULT_INPUT_COUNT = 1
 ARTIFACT_PREFIX = "agentbench-verify-"
 INPUT_FILE_MARKER = "@"
-
-# The shared 256 KiB budget exists to capture real provider traffic in full. A
-# startup check only needs enough of each payload to recognise it, and an Agent
-# that resends a long system prompt every turn would otherwise bury the report.
-VERIFY_TRACE_MAX_BYTES = 2048
 
 
 def configure_parser(parser: ArgumentParser) -> None:
@@ -85,12 +83,9 @@ def configure_parser(parser: ArgumentParser) -> None:
     parser.add_argument(
         "--llm-trace-max-bytes",
         type=int,
-        default=VERIFY_TRACE_MAX_BYTES,
+        default=DEFAULT_TRACE_MAX_BYTES,
         metavar="BYTES",
-        help=(
-            "Maximum captured payload bytes shown per direction with "
-            f"--llm-trace. Defaults to {VERIFY_TRACE_MAX_BYTES}."
-        ),
+        help="Maximum captured payload bytes per request or response.",
     )
 
 
@@ -106,7 +101,7 @@ def execute(args: Namespace) -> int:
         kwargs["probe_text"] = _probe_text(args.input)
     if args.llm_trace != "off":
         kwargs["llm_trace"] = args.llm_trace
-    if args.llm_trace_max_bytes != VERIFY_TRACE_MAX_BYTES:
+    if args.llm_trace_max_bytes != DEFAULT_TRACE_MAX_BYTES:
         kwargs["llm_trace_max_bytes"] = args.llm_trace_max_bytes
     return verify(args.agent_id, **kwargs)
 
@@ -121,7 +116,7 @@ def verify(
     output_fn: Callable[[str], None] = print,
     offline: OfflineRuntime | None = None,
     llm_trace: str = "off",
-    llm_trace_max_bytes: int = VERIFY_TRACE_MAX_BYTES,
+    llm_trace_max_bytes: int = DEFAULT_TRACE_MAX_BYTES,
     as_json: bool = False,
 ) -> int:
     """Start one Agent offline and confirm its model traffic is observable.
@@ -134,50 +129,77 @@ def verify(
     # In JSON mode nothing may reach stdout before the document itself.
     stage_output = _discard if as_json else output_fn
 
-    if input_count < 1:
-        return _fail_early(
-            agent_id, "--inputs must be at least 1", output_fn, as_json=as_json
-        )
-
-    registry = load_registry(registry_path)
-    try:
-        # Disabled Agents are verifiable on purpose: this is the check you run while
-        # adapting, before an Agent is ever enabled for a batch.
-        agent = registry.find(agent_id, enabled_only=False)
-    except (KeyError, ValueError) as exc:
-        # str(KeyError) re-quotes its argument, which would leak into the report.
-        message = exc.args[0] if exc.args else str(exc)
-        return _fail_early(agent_id, str(message), output_fn, as_json=as_json)
-
-    preflight = _preflight_error(agent)
-    if preflight is not None:
-        return _fail_early(agent_id, preflight, output_fn, as_json=as_json)
+    agent, rejection = _select_agent(agent_id, registry_path, input_count)
+    if agent is None:
+        return _fail_early(agent_id, rejection, output_fn, as_json=as_json)
 
     print_header(agent_id, stage_output)
-
-    # One Case keeps verification about startup rather than benchmark coverage.
-    target = replace(agent, case_count=1)
     # The live panel is wanted on a terminal, but its non-interactive fallback would
     # duplicate what the sectioned report already prints, so that path is silenced.
     llm_activity = LLMActivity(
         _discard,
         live_updates=not as_json and sys.stdout.isatty(),
     )
-    offline = offline or build_offline_runtime(
-        max_inputs=input_count,
-        probes=probe_inputs(probe_text, count=input_count),
-        output_fn=stage_output,
-        llm_trace=llm_trace,
-        llm_trace_max_bytes=llm_trace_max_bytes,
-        activity_sink=llm_activity,
+    report = _run_verification(
+        agent=agent,
+        offline=offline
+        or build_offline_runtime(
+            max_inputs=input_count,
+            probes=probe_inputs(probe_text, count=input_count),
+            output_fn=stage_output,
+            llm_trace=llm_trace,
+            llm_trace_max_bytes=llm_trace_max_bytes,
+            activity_sink=llm_activity,
+        ),
+        llm_activity=llm_activity,
+        stage_output=stage_output,
+        keep_artifacts=keep_artifacts,
     )
+
+    if as_json:
+        output_fn(report.to_json())
+    else:
+        output_fn("")
+        print_report(report, output_fn)
+    return report.exit_code
+
+
+def _select_agent(
+    agent_id: str, registry_path: str | Path, input_count: int
+) -> tuple[AgentRegistration | None, str]:
+    """Resolve the Agent, or explain why verification cannot run at all."""
+
+    if input_count < 1:
+        return None, "--inputs must be at least 1"
+    try:
+        # Disabled Agents are verifiable on purpose: this is the check you run while
+        # adapting, before an Agent is ever enabled for a batch.
+        agent = load_registry(registry_path).find(agent_id, enabled_only=False)
+    except (KeyError, ValueError) as exc:
+        # str(KeyError) re-quotes its argument, which would leak into the report.
+        return None, str(exc.args[0] if exc.args else exc)
+
+    rejection = _preflight_error(agent)
+    return (None, rejection) if rejection else (agent, "")
+
+
+def _run_verification(
+    *,
+    agent: AgentRegistration,
+    offline: OfflineRuntime,
+    llm_activity: LLMActivity,
+    stage_output: Callable[[str], None],
+    keep_artifacts: bool,
+) -> VerifyReport:
+    """Run the single Case and summarize it, cleaning up unless asked not to."""
 
     artifact_dir = Path(tempfile.mkdtemp(prefix=ARTIFACT_PREFIX))
     try:
         execution = run_benchmark_once(
-            (target,),
+            # One Case keeps verification about startup, not benchmark coverage.
+            (replace(agent, case_count=1),),
             runner=offline.runner,
-            output_path=artifact_dir / f"verify-{_safe_name(agent_id)}.jsonl",
+            output_path=artifact_dir / f"verify-{_safe_name(agent.agent_id)}.jsonl",
             output_fn=_discard,  # the sectioned report owns all verify output
             viewer_starter=None,
             llm_activity=llm_activity,
@@ -187,18 +209,12 @@ def verify(
                 call_count=lambda: offline.captured_pair_count,
             ),
         )
-        report = _build_report(
-            agent_id=agent_id,
+        return _build_report(
+            agent_id=agent.agent_id,
             execution=execution,
             offline=offline,
             keep_artifacts=keep_artifacts,
         )
-        if as_json:
-            output_fn(report.to_json())
-        else:
-            output_fn("")
-            print_report(report, output_fn)
-        return report.exit_code
     finally:
         if not keep_artifacts:
             shutil.rmtree(artifact_dir, ignore_errors=True)

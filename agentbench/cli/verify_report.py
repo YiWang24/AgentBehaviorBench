@@ -176,12 +176,12 @@ def _print_verdict(report: VerifyReport, output_fn: Callable[[str], None]) -> No
         output_fn(f"         log  {report.result_log}")
 
 
-def print_stage(
+def _print_stage(
     label: str,
     detail: str,
     output_fn: Callable[[str], None],
     *,
-    ok: bool = True,
+    ok: bool,
 ) -> None:
     mark = f"{ANSI_GREEN}{MARK_OK}{ANSI_RESET}" if ok else f"{ANSI_RED}{MARK_FAIL}{ANSI_RESET}"
     output_fn(f"  {mark}  {label:<{LABEL_WIDTH}}{detail}")
@@ -231,7 +231,7 @@ class VerifyProgress:
         self._stop_live()
         ok = status == "succeeded"
         self._failed = self._failed or not ok
-        print_stage(
+        _print_stage(
             label,
             self._detail(stage, getattr(event, "detail", None), ok=ok),
             self._output_fn,
@@ -275,5 +275,4 @@ __all__ = [
     "VerifyReport",
     "print_header",
     "print_report",
-    "print_stage",
 ]
