@@ -165,3 +165,12 @@ status = "adapting"
 framework = "langgraph"
 source = "https://github.com/darwin-lau/langmanus"
 case = 1
+
+[[agents]]
+agent_id = "ai-travel-agent"
+path = "resources/agents/19-ai-travel-agent"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/nirbar1985/ai-travel-agent"
+case = 1
