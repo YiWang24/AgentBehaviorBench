@@ -53,3 +53,16 @@ status = "adapting"
 framework = "langgraph"
 source = "https://github.com/TauricResearch/TradingAgents"
 case = 1
+
+# Adapted and offline-proven up to the planner node, but `verify` cannot drive
+# it to completion: five call sites require JSON model output that the offline
+# mock does not produce. See the Agent README, "Offline gate limitation".
+# Certification against a real model owns the transition to ready.
+[[agents]]
+agent_id = "gpt-researcher"
+path = "resources/agents/07-gpt-researcher"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/assafelovic/gpt-researcher"
+case = 1
