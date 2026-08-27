@@ -72,13 +72,21 @@ def _plain(text: str) -> str:
 
 
 def _verdict_line(output: list[str]) -> str:
-    """The PASS/FAIL line of the sectioned report."""
+    """The PASS/FAIL verdict, rejoined when a long reason wrapped across lines."""
 
+    collected: list[str] = []
     for line in output:
-        stripped = _plain(line)
-        if stripped.startswith(("PASS", "FAIL")):
-            return stripped
-    raise AssertionError(f"no verdict line in {[_plain(line) for line in output]}")
+        text = _plain(line)
+        if not collected:
+            if text.startswith(("PASS", "FAIL")):
+                collected.append(text)
+            continue
+        if not text or text.startswith("log "):
+            break
+        collected.append(text)
+    if not collected:
+        raise AssertionError(f"no verdict line in {[_plain(line) for line in output]}")
+    return " ".join(collected)
 
 
 def _json_report(output: list[str]) -> dict:
@@ -237,7 +245,7 @@ def test_verification_fails_when_no_model_call_is_captured(repo_root: Path) -> N
     )
 
     assert exit_code == 1
-    assert "not observable" in output[-1]
+    assert "not observable" in _verdict_line(output)
 
 
 class _FailingSuiteRunner:

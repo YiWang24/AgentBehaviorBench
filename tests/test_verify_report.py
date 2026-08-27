@@ -172,6 +172,29 @@ def test_failing_report_leads_with_the_reason() -> None:
     assert "AgentStartError: container exited" in verdict
 
 
+def test_a_long_failure_reason_wraps_instead_of_running_off_the_report() -> None:
+    """The reason names its underlying cause, so it can outrun the other lines."""
+
+    output: list[str] = []
+    report = VerifyReport(
+        agent_id="demo",
+        verdict=FAIL,
+        reason=(
+            "AgentInvocationError: Agent 'gpt-researcher' failed for SDK Input "
+            "'offline-probe-1': DockerSessionError: AttributeError: 'str' object "
+            "has no attribute 'get'"
+        ),
+    )
+
+    print_report(report, output.append)
+    plain = [_plain(line) for line in output if _plain(line).strip()]
+    rejoined = " ".join(line.strip() for line in plain)
+
+    assert plain[0].strip().startswith("FAIL")
+    assert all(len(line) <= 80 for line in plain), [len(line) for line in plain]
+    assert "AttributeError: 'str' object has no attribute 'get'" in rejoined
+
+
 def test_long_call_lists_are_elided_in_the_middle() -> None:
     output: list[str] = []
     calls = tuple(_call(index) for index in range(1, MAX_DISPLAYED_CALLS + 6))
@@ -302,6 +325,22 @@ def test_stage_lines_report_each_boundary_once() -> None:
     assert "offline_abcdef" in plain[2]
     assert plain[3].endswith("3 model calls")
     assert not progress.failed
+
+
+def test_a_long_stage_detail_is_cut_so_the_stage_column_stays_scannable() -> None:
+    output: list[str] = []
+    progress = VerifyProgress(output.append)
+    reason = (
+        "AgentInvocationError: Agent 'gpt-researcher' failed for SDK Input "
+        "'offline-probe-1': DockerSessionError: AttributeError: 'str' object "
+        "has no attribute 'get'"
+    )
+
+    progress(BenchmarkProgress("benchmark_execution", "failed", detail=reason))  # type: ignore[arg-type]
+
+    line = _plain(output[0])
+    assert len(line) <= 80, len(line)
+    assert line.rstrip().endswith("…")
 
 
 def test_failed_stage_is_marked_and_remembered() -> None:

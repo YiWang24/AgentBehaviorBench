@@ -361,14 +361,29 @@ def _prompt_schema_content(payload: Mapping[str, Any]) -> str | None:
     return json.dumps(_arguments_for(schema), ensure_ascii=False)
 
 
-def _openai_chat(payload: Mapping[str, Any], model: str, token: str) -> dict[str, Any]:
-    structured = _structured_content(payload)
-    tool = None if _has_tool_result(payload.get("messages")) else _first_tool(payload)
+def _reply_text(payload: Mapping[str, Any]) -> str | None:
+    """Content for a turn that answers in text rather than by calling a tool.
 
-    if structured is not None:
-        message: dict[str, Any] = {"role": "assistant", "content": structured}
+    Only reached once a tool call has been ruled out. Every protocol ranks the
+    two the same way: an Agent that bound tools is waiting for a tool call, and a
+    schema — declared in the request or stated in the prompt — describes the
+    answer it wants after that.
+    """
+
+    return _structured_content(payload) or _prompt_schema_content(payload)
+
+
+def _openai_chat(payload: Mapping[str, Any], model: str, token: str) -> dict[str, Any]:
+    tool = None if _has_tool_result(payload.get("messages")) else _first_tool(payload)
+    structured = _reply_text(payload) if tool is None else None
+
+    if tool is None:
+        message: dict[str, Any] = {
+            "role": "assistant",
+            "content": structured or OFFLINE_TEXT,
+        }
         finish_reason = "stop"
-    elif tool is not None:
+    else:
         name, arguments = tool
         message = {
             "role": "assistant",
@@ -385,12 +400,6 @@ def _openai_chat(payload: Mapping[str, Any], model: str, token: str) -> dict[str
             ],
         }
         finish_reason = "tool_calls"
-    else:
-        message = {
-            "role": "assistant",
-            "content": _prompt_schema_content(payload) or OFFLINE_TEXT,
-        }
-        finish_reason = "stop"
 
     return {
         "id": f"chatcmpl-defuzex-offline-{token}",
@@ -406,11 +415,7 @@ def _openai_responses(
     payload: Mapping[str, Any], model: str, token: str
 ) -> dict[str, Any]:
     tool = None if _has_tool_result(payload.get("input")) else _first_tool(payload)
-    structured = (
-        (_structured_content(payload) or _prompt_schema_content(payload))
-        if tool is None
-        else None
-    )
+    structured = _reply_text(payload) if tool is None else None
     if structured is not None:
         output: list[dict[str, Any]] = [
             {
@@ -460,12 +465,7 @@ def _anthropic_messages(
     tool = None if _has_tool_result(payload.get("messages")) else _first_tool(payload)
     content: list[dict[str, Any]]
     if tool is None:
-        text = (
-            _structured_content(payload)
-            or _prompt_schema_content(payload)
-            or OFFLINE_TEXT
-        )
-        content = [{"type": "text", "text": text}]
+        content = [{"type": "text", "text": _reply_text(payload) or OFFLINE_TEXT}]
         stop_reason = "end_turn"
     else:
         name, arguments = tool

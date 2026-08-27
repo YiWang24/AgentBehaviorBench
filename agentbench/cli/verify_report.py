@@ -8,6 +8,7 @@ nothing can break on a long path, and every line stays greppable.
 from __future__ import annotations
 
 import json
+import textwrap
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,6 +36,7 @@ SEPARATOR = "·"
 
 LABEL_WIDTH = 16
 PREVIEW_WIDTH = 54
+DETAIL_WIDTH = 70
 RUN_ID_WIDTH = 20
 MAX_DISPLAYED_CALLS = 10
 
@@ -182,7 +184,13 @@ def _print_verdict(report: VerifyReport, output_fn: Callable[[str], None]) -> No
         badge = f"{ANSI_RED}{ANSI_BOLD}FAIL{ANSI_RESET}"
         detail = report.reason or "verification did not complete"
 
-    output_fn(f"  {badge}   {detail}")
+    # A failure reason now names its underlying cause, which can outrun the rest
+    # of the report. Wrapping keeps it whole and aligned instead of letting the
+    # terminal break it at an arbitrary column.
+    head, *rest = textwrap.wrap(detail, DETAIL_WIDTH) or [""]
+    output_fn(f"  {badge}   {head}")
+    for line in rest:
+        output_fn(f"{'':<9}{line}")
     if report.result_log is not None:
         output_fn(f"         log  {report.result_log}")
 
@@ -195,7 +203,11 @@ def _print_stage(
     ok: bool,
 ) -> None:
     mark = f"{ANSI_GREEN}{MARK_OK}{ANSI_RESET}" if ok else f"{ANSI_RED}{MARK_FAIL}{ANSI_RESET}"
-    output_fn(f"  {mark}  {label:<{LABEL_WIDTH}}{detail}")
+    # These lines form a scannable column, so a failure detail is cut here rather
+    # than allowed to wrap; the verdict below carries the same reason in full.
+    output_fn(
+        f"  {mark}  {label:<{LABEL_WIDTH}}{truncate(detail, DETAIL_WIDTH - LABEL_WIDTH)}"
+    )
 
 
 STAGE_LABELS = {

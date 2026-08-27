@@ -306,19 +306,6 @@ def _discard(_: str) -> None:
     """Swallow shared-execution chatter that the verify report replaces."""
 
 
-def _agent_started(result: BenchmarkSuiteResult, agent_id: str) -> bool:
-    """Startup succeeded when the single Case ran end to end without harness errors."""
-
-    if result.skipped_count != 0 or len(result.items) != 1:
-        return False
-    item = result.items[0]
-    return (
-        item.agent_id == agent_id
-        and item.error_type is None
-        and item.completed_case_count == item.requested_case_count
-    )
-
-
 def _preflight_error(agent: AgentRegistration) -> str | None:
     """Reject Agents that cannot answer the question verification asks."""
 

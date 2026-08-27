@@ -153,6 +153,95 @@ def test_structured_output_request_returns_schema_shaped_json() -> None:
     assert json.loads(choice["message"]["content"]) == {"classification": "respond"}
 
 
+def test_every_protocol_ranks_a_declared_tool_above_a_requested_schema() -> None:
+    """An Agent that bound tools is waiting for a tool call.
+
+    A schema describes the answer it wants afterwards, so a request carrying both
+    must resolve the same way on every protocol; ranking them differently made one
+    protocol answer in text while the others called the tool.
+    """
+
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "schema": {
+                "type": "object",
+                "required": ["verdict"],
+                "properties": {"verdict": {"type": "string"}},
+            }
+        },
+    }
+    chat_tool = {
+        "type": "function",
+        "function": {"name": "search", "parameters": {"type": "object"}},
+    }
+    flat_tool = {"name": "search", "input_schema": {"type": "object"}}
+
+    chat = _reply(
+        {
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [chat_tool],
+            "response_format": response_format,
+        }
+    )
+    responses = _reply(
+        {
+            "input": [{"role": "user", "content": "hi"}],
+            "tools": [flat_tool],
+            "response_format": response_format,
+        },
+        protocol_plugin="openai-responses",
+    )
+    anthropic = _reply(
+        {
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [flat_tool],
+            "response_format": response_format,
+        },
+        protocol_plugin="anthropic-messages",
+    )
+
+    assert chat["choices"][0]["finish_reason"] == "tool_calls"
+    assert chat["choices"][0]["message"]["tool_calls"][0]["function"]["name"] == "search"
+    assert responses["output"][0]["type"] == "function_call"
+    assert anthropic["stop_reason"] == "tool_use"
+
+
+def test_a_requested_schema_is_still_answered_when_no_tool_is_declared() -> None:
+    """Ranking tools first must not stop a plain schema request being honoured."""
+
+    for plugin, key in (
+        ("openai-chat", "messages"),
+        ("openai-responses", "input"),
+        ("anthropic-messages", "messages"),
+    ):
+        body = _reply(
+            {
+                key: [{"role": "user", "content": "hi"}],
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "schema": {
+                            "type": "object",
+                            "required": ["verdict"],
+                            "properties": {
+                                "verdict": {"type": "string", "enum": ["yes", "no"]}
+                            },
+                        }
+                    },
+                },
+            },
+            protocol_plugin=plugin,
+        )
+        if plugin == "openai-chat":
+            text = body["choices"][0]["message"]["content"]
+        elif plugin == "openai-responses":
+            text = body["output"][0]["content"][0]["text"]
+        else:
+            text = body["content"][0]["text"]
+        assert json.loads(text) == {"verdict": "yes"}, plugin
+
+
 def test_anthropic_messages_reply_uses_tool_use_blocks() -> None:
     body = _reply(
         {

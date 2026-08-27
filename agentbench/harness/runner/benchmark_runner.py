@@ -233,9 +233,12 @@ class BenchmarkRunner:
                         _step_failure(test_input.input_id, test_input.payload, exc),
                     )
                 self._record_failed_submission(sdk_run, exc)
+                # The cause has to be in the message, not just __cause__: results
+                # carry the error as plain strings, so anything left on the
+                # exception object is lost before a report can show it.
                 raise AgentInvocationError(
                     f"Agent {registration.agent_id!r} failed for "
-                    f"SDK Input {test_input.input_id!r}"
+                    f"SDK Input {test_input.input_id!r}: {_error_detail(exc)}"
                 ) from exc
 
             step = BenchmarkStepResult(
