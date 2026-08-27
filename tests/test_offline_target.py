@@ -711,6 +711,79 @@ def test_optional_fields_answer_the_non_null_branch() -> None:
     assert arguments == {"count": 0}
 
 
+def test_prompt_json_example_is_echoed_back() -> None:
+    """Some agents state the contract by example and parse the reply themselves.
+
+    Returning the example as written keeps their parser working, including any
+    flag they set to stop a loop running again.
+    """
+
+    body = _reply(
+        {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": (
+                        "Respond with JSON in exactly this shape:\n"
+                        '{"diagnosis": "name", "confidence": 0.6, "needs_more_info": false}\n'
+                        "Return ONLY valid JSON, no markdown fences."
+                    ),
+                }
+            ]
+        }
+    )
+
+    assert json.loads(body["choices"][0]["message"]["content"]) == {
+        "diagnosis": "name",
+        "confidence": 0.6,
+        "needs_more_info": False,
+    }
+
+
+def test_prompt_without_a_json_request_is_left_alone() -> None:
+    """A stray object in prose must not turn a chat reply into JSON."""
+
+    body = _reply(
+        {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": 'Explain what {"a": 1, "b": 2} means in set notation.',
+                }
+            ]
+        }
+    )
+
+    assert body["choices"][0]["message"]["content"] == OFFLINE_TEXT
+
+
+def test_single_key_object_is_not_treated_as_a_template() -> None:
+    body = _reply(
+        {
+            "messages": [
+                {"role": "user", "content": 'Return JSON. Example: {"ok": true}'}
+            ]
+        }
+    )
+
+    assert body["choices"][0]["message"]["content"] == OFFLINE_TEXT
+
+
+def test_a_declared_tool_wins_over_a_prompt_example() -> None:
+    body = _reply(
+        {
+            "messages": [
+                {"role": "user", "content": 'Return JSON: {"a": 1, "b": 2}'}
+            ],
+            "tools": [
+                {"type": "function", "function": {"name": "search", "parameters": {}}}
+            ],
+        }
+    )
+
+    assert body["choices"][0]["finish_reason"] == "tool_calls"
+
+
 def test_non_streaming_request_still_gets_json() -> None:
     body = _reply({"messages": [{"role": "user", "content": "hi"}]})
 

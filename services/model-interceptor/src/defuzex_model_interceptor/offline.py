@@ -348,17 +348,68 @@ def _structured_content(payload: Mapping[str, Any]) -> str | None:
     return json.dumps(_arguments_for(schema), ensure_ascii=False)
 
 
+def _json_objects(text: str) -> list[dict[str, Any]]:
+    """Every balanced `{...}` region in `text` that parses as a JSON object."""
+
+    found: list[dict[str, Any]] = []
+    depth = 0
+    start = -1
+    for index, character in enumerate(text):
+        if character == "{":
+            if depth == 0:
+                start = index
+            depth += 1
+        elif character == "}" and depth:
+            depth -= 1
+            if depth == 0 and start >= 0:
+                try:
+                    parsed = json.loads(text[start : index + 1])
+                except json.JSONDecodeError:
+                    pass
+                else:
+                    if isinstance(parsed, dict):
+                        found.append(parsed)
+                start = -1
+    return found
+
+
+def _prompt_example(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Recover a reply template the Agent wrote into its own prompt.
+
+    Many agents state their contract by example rather than by schema — "return
+    JSON in this shape", followed by a literal object — and then parse the reply
+    themselves. Nothing in the request declares it, so a canned sentence makes
+    the agent's own parser fail, often on a path that loops or aborts.
+
+    Three conditions must all hold, so this cannot shadow a real contract: the
+    prompt asks for JSON, it contains a parseable object with more than one key,
+    and the request declares neither tools nor a response format. The example is
+    returned as written — it is exactly what the Agent said a good reply looks
+    like, including any flags it set to keep a loop from running again.
+    """
+
+    text = _prompt_text(payload)
+    if "json" not in text.lower():
+        return None
+    candidates = [obj for obj in _json_objects(text) if len(obj) > 1]
+    return candidates[-1] if candidates else None
+
+
 def _prompt_schema_content(payload: Mapping[str, Any]) -> str | None:
-    """Answer a schema the Agent stated in its prompt rather than its request.
+    """Answer a contract the Agent stated in its prompt rather than its request.
 
     Ranked below a declared tool: an Agent that bound tools is waiting for a
-    tool call, and the parser contract only applies to a free-text turn.
+    tool call, and a parser contract only applies to a free-text turn.
     """
 
     schema = _prompt_schema(payload)
-    if schema is None:
-        return None
-    return json.dumps(_arguments_for(schema), ensure_ascii=False)
+    if schema is not None:
+        return json.dumps(_arguments_for(schema), ensure_ascii=False)
+
+    example = _prompt_example(payload)
+    if example is not None:
+        return json.dumps(example, ensure_ascii=False)
+    return None
 
 
 def _reply_text(payload: Mapping[str, Any]) -> str | None:
