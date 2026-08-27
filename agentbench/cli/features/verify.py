@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import shutil
+import sys
 import tempfile
 from argparse import ArgumentParser, Namespace
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from agentbench.harness import BenchmarkSuiteResult
+from agentbench.harness import BenchmarkSuiteResult, SuiteAgentResult
 from agentbench.harness.offline import DEFAULT_PROBE_TEXT, probe_inputs
 from agentbench.harness.registry import AgentRegistration, load_registry
 from agentbench.runtime.agentcontainer import runtime_type
@@ -19,9 +20,18 @@ from agentbench.runtime.interception import (
 )
 
 from agentbench.cli.environment import load_project_environment
-from agentbench.cli.execution import run_benchmark_once
+from agentbench.cli.execution import BenchmarkExecution, run_benchmark_once
 from agentbench.cli.offline_runtime import OfflineRuntime, build_offline_runtime
 from agentbench.cli.TerminalUI import LLMActivity
+from agentbench.cli.verify_report import (
+    ERROR,
+    FAIL,
+    PASS,
+    VerifyProgress,
+    VerifyReport,
+    print_header,
+    print_report,
+)
 
 from .base import CommandFeature
 from .run import DEFAULT_REGISTRY_PATH
@@ -59,6 +69,12 @@ def configure_parser(parser: ArgumentParser) -> None:
         help="Keep the temporary result log instead of deleting it on exit.",
     )
     parser.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Print one JSON summary instead of the human report.",
+    )
+    parser.add_argument(
         "--llm-trace",
         choices=("off", "terminal"),
         default="off",
@@ -79,6 +95,8 @@ def execute(args: Namespace) -> int:
         "input_count": args.inputs,
         "keep_artifacts": args.keep_artifacts,
     }
+    if args.as_json:
+        kwargs["as_json"] = True
     if args.input is not None:
         kwargs["probe_text"] = _probe_text(args.input)
     if args.llm_trace != "off":
@@ -99,6 +117,7 @@ def verify(
     offline: OfflineRuntime | None = None,
     llm_trace: str = "off",
     llm_trace_max_bytes: int = DEFAULT_TRACE_MAX_BYTES,
+    as_json: bool = False,
 ) -> int:
     """Start one Agent offline and confirm its model traffic is observable.
 
@@ -107,9 +126,13 @@ def verify(
     healthy; it says nothing about benchmark quality.
     """
 
+    # In JSON mode nothing may reach stdout before the document itself.
+    stage_output = _discard if as_json else output_fn
+
     if input_count < 1:
-        output_fn("Verification error: --inputs must be at least 1.")
-        return 2
+        return _fail_early(
+            agent_id, "--inputs must be at least 1", output_fn, as_json=as_json
+        )
 
     registry = load_registry(registry_path)
     try:
@@ -117,27 +140,28 @@ def verify(
         # adapting, before an Agent is ever enabled for a batch.
         agent = registry.find(agent_id, enabled_only=False)
     except (KeyError, ValueError) as exc:
-        output_fn(f"Verification error: {exc}")
-        return 2
+        # str(KeyError) re-quotes its argument, which would leak into the report.
+        message = exc.args[0] if exc.args else str(exc)
+        return _fail_early(agent_id, str(message), output_fn, as_json=as_json)
 
     preflight = _preflight_error(agent)
     if preflight is not None:
-        output_fn(f"Verification error: {preflight}")
-        return 2
+        return _fail_early(agent_id, preflight, output_fn, as_json=as_json)
 
-    output_fn(f"Verifying Agent offline: {agent_id}")
-    output_fn(
-        "No DefuzeX or provider credentials are used, network egress is blocked, "
-        "and the Registry is not modified."
-    )
+    print_header(agent_id, stage_output)
 
     # One Case keeps verification about startup rather than benchmark coverage.
     target = replace(agent, case_count=1)
-    llm_activity = LLMActivity(output_fn)
+    # The live panel is wanted on a terminal, but its non-interactive fallback would
+    # duplicate what the sectioned report already prints, so that path is silenced.
+    llm_activity = LLMActivity(
+        _discard,
+        live_updates=not as_json and sys.stdout.isatty(),
+    )
     offline = offline or build_offline_runtime(
         max_inputs=input_count,
         probes=probe_inputs(probe_text, count=input_count),
-        output_fn=output_fn,
+        output_fn=stage_output,
         llm_trace=llm_trace,
         llm_trace_max_bytes=llm_trace_max_bytes,
         activity_sink=llm_activity,
@@ -149,60 +173,120 @@ def verify(
             (target,),
             runner=offline.runner,
             output_path=artifact_dir / f"verify-{_safe_name(agent_id)}.jsonl",
-            output_fn=output_fn,
+            output_fn=_discard,  # the sectioned report owns all verify output
             viewer_starter=None,
             llm_activity=llm_activity,
+            progress=VerifyProgress(
+                stage_output,
+                llm_activity=llm_activity,
+                call_count=lambda: offline.captured_pair_count,
+            ),
         )
-        exit_code = _report(
+        report = _build_report(
             agent_id=agent_id,
-            execution_result=execution.result,
-            exit_code=execution.exit_code,
-            captured_pairs=offline.captured_pair_count,
-            substituted_secrets=offline.substituted_secrets,
-            output_fn=output_fn,
+            execution=execution,
+            offline=offline,
+            keep_artifacts=keep_artifacts,
         )
-        if keep_artifacts and execution.result_log is not None:
-            output_fn(f"Result log kept: {execution.result_log.path}")
-        return exit_code
+        if as_json:
+            output_fn(report.to_json())
+        else:
+            output_fn("")
+            print_report(report, output_fn)
+        return report.exit_code
     finally:
         if not keep_artifacts:
             shutil.rmtree(artifact_dir, ignore_errors=True)
 
 
-def _report(
+def _build_report(
     *,
     agent_id: str,
-    execution_result: BenchmarkSuiteResult | None,
-    exit_code: int,
-    captured_pairs: int,
-    substituted_secrets: tuple[str, ...],
-    output_fn: Callable[[str], None],
-) -> int:
+    execution: BenchmarkExecution,
+    offline: OfflineRuntime,
+    keep_artifacts: bool,
+) -> VerifyReport:
     """Turn the suite outcome into a startup verdict."""
 
-    if substituted_secrets:
-        output_fn(
-            "Placeholder secrets substituted for offline run: "
-            + ", ".join(substituted_secrets)
-        )
-
-    if execution_result is None or not _agent_started(execution_result, agent_id):
-        output_fn(f"Verification FAILED. Agent '{agent_id}' did not complete startup.")
-        return exit_code or 1
-
-    output_fn(f"Captured LLM request/response pairs: {captured_pairs}")
-    if captured_pairs < 1:
-        output_fn(
-            f"Verification FAILED. Agent '{agent_id}' ran but no model call was "
-            "captured, so its LLM traffic is not observable."
-        )
-        return 1
-
-    output_fn(
-        f"Verification PASSED. Agent '{agent_id}' starts, responds, and its model "
-        "traffic is fully captured."
+    result = execution.result
+    log_path = (
+        execution.result_log.path
+        if keep_artifacts and execution.result_log is not None
+        else None
     )
-    return 0
+    common: dict[str, object] = {
+        "agent_id": agent_id,
+        "captured_pairs": offline.captured_pair_count,
+        "substituted_secrets": offline.substituted_secrets,
+        "result_log": log_path,
+        "calls": offline.calls,
+    }
+    item = _agent_item(result, agent_id)
+    if item is not None:
+        common.update(
+            completed_cases=item.completed_case_count,
+            requested_cases=item.requested_case_count,
+        )
+
+    if item is None or not _started(item):
+        reason = "Agent did not complete startup"
+        if item is not None and item.error_type is not None:
+            reason = f"{item.error_type}: {item.error_message}"
+        return VerifyReport(
+            verdict=FAIL,
+            exit_code=execution.exit_code or 1,
+            reason=reason,
+            **common,  # type: ignore[arg-type]
+        )
+
+    if offline.captured_pair_count < 1:
+        return VerifyReport(
+            verdict=FAIL,
+            exit_code=1,
+            reason="Agent ran but no model call was captured, so its LLM traffic is not observable",
+            **common,  # type: ignore[arg-type]
+        )
+
+    return VerifyReport(verdict=PASS, exit_code=0, **common)  # type: ignore[arg-type]
+
+
+def _fail_early(
+    agent_id: str,
+    reason: str,
+    output_fn: Callable[[str], None],
+    *,
+    as_json: bool,
+) -> int:
+    report = VerifyReport(
+        agent_id=agent_id, verdict=ERROR, exit_code=2, reason=reason
+    )
+    if as_json:
+        output_fn(report.to_json())
+    else:
+        output_fn(f"Verification error: {reason}")
+    return 2
+
+
+def _agent_item(
+    result: BenchmarkSuiteResult | None, agent_id: str
+) -> SuiteAgentResult | None:
+    if result is None or result.skipped_count != 0 or len(result.items) != 1:
+        return None
+    item = result.items[0]
+    return item if item.agent_id == agent_id else None
+
+
+def _started(item: SuiteAgentResult) -> bool:
+    """Startup succeeded when the single Case ran end to end without harness errors."""
+
+    return (
+        item.error_type is None
+        and item.completed_case_count == item.requested_case_count
+    )
+
+
+def _discard(_: str) -> None:
+    """Swallow shared-execution chatter that the verify report replaces."""
 
 
 def _agent_started(result: BenchmarkSuiteResult, agent_id: str) -> bool:

@@ -5,8 +5,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from agentbench.harness import (
+    BenchmarkProgress,
     ProviderSelectionError,
     SuiteAgentResult,
     SuiteConfigurationError,
@@ -30,6 +32,16 @@ from .viewer import RunningViewer
 ViewerStarter = Callable[[Path], RunningViewer]
 
 
+class ProgressReporter(Protocol):
+    """A progress renderer that also releases any live terminal state."""
+
+    def __call__(self, event: BenchmarkProgress) -> None:
+        ...
+
+    def close(self) -> None:
+        ...
+
+
 @dataclass(frozen=True)
 class BenchmarkExecution:
     exit_code: int
@@ -46,6 +58,7 @@ def run_benchmark_once(
     output_fn: Callable[[str], None],
     viewer_starter: ViewerStarter | None,
     llm_activity: LLMActivity | None = None,
+    progress: ProgressReporter | None = None,
 ) -> BenchmarkExecution:
     suite_id = runner.new_suite_id()
     result_log: ResultLogWriter | None = None
@@ -64,7 +77,7 @@ def run_benchmark_once(
             output_fn(f"View: {viewer.url}")
 
     activity = llm_activity or LLMActivity(output_fn)
-    progress_printer = ProgressPrinter(output_fn, llm_activity=activity)
+    progress_printer = progress or ProgressPrinter(output_fn, llm_activity=activity)
     try:
         try:
             result = runner.run_defuzex(

@@ -12,6 +12,7 @@ from agentbench.harness.offline import (
     OfflineSecretResolver,
     OfflineSuiteRunner,
 )
+from agentbench.cli.TerminalUI.call_log import CallRecord, CallRecorder
 from agentbench.runtime import RuntimeFactory
 from agentbench.runtime.docker import DockerRuntime
 from agentbench.runtime.interception import (
@@ -39,12 +40,19 @@ class OfflineRuntime:
     runner: SuiteRunner
     trace_state: InterceptionTraceState
     secret_resolver: OfflineSecretResolver
+    call_recorder: CallRecorder
 
     @property
     def captured_pair_count(self) -> int:
         """Matched ``llm_request``/``llm_response`` pairs seen across the run."""
 
         return self.trace_state.checkpoint()
+
+    @property
+    def calls(self) -> tuple[CallRecord, ...]:
+        """Completed calls, retained for the post-run report."""
+
+        return tuple(self.call_recorder.records)
 
     @property
     def substituted_secrets(self) -> tuple[str, ...]:
@@ -69,7 +77,8 @@ def build_offline_runtime(
     # Counting pairs here is independent of the runtime's own required-trace gate,
     # so the CLI can report how much model traffic verification actually observed.
     trace_state = InterceptionTraceState()
-    sinks: list[TraceSink] = [trace_state]
+    call_recorder = CallRecorder()
+    sinks: list[TraceSink] = [trace_state, call_recorder]
     if activity_sink is not None:
         sinks.append(activity_sink)
     if llm_trace == "terminal":
@@ -110,6 +119,7 @@ def build_offline_runtime(
         ),
         trace_state=trace_state,
         secret_resolver=secret_resolver,
+        call_recorder=call_recorder,
     )
 
 

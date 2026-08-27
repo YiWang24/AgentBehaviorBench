@@ -25,6 +25,8 @@ from agentbench.harness.offline import (
     OfflineSecretResolver,
     probe_inputs,
 )
+from agentbench.cli.presentation import ANSI_PATTERN
+from agentbench.cli.TerminalUI.call_log import CallRecorder
 from agentbench.harness.runner.benchmark_runner import BenchmarkRunner
 from agentbench.runtime.interception import InterceptionTraceState, TraceEvent
 from tests.test_cli import FakeSuiteRunner
@@ -52,11 +54,30 @@ def _offline(
         runner=runner or FakeSuiteRunner(),  # type: ignore[arg-type]
         trace_state=_trace_state(pairs),
         secret_resolver=resolver or OfflineSecretResolver({}),
+        call_recorder=CallRecorder(),
     )
 
 
 def _registry_path(repo_root: Path) -> Path:
     return repo_root / "resources" / "registry.toml"
+
+
+def _plain(text: str) -> str:
+    return ANSI_PATTERN.sub("", text).strip()
+
+
+def _verdict_line(output: list[str]) -> str:
+    """The PASS/FAIL line of the sectioned report."""
+
+    for line in output:
+        stripped = _plain(line)
+        if stripped.startswith(("PASS", "FAIL")):
+            return stripped
+    raise AssertionError(f"no verdict line in {[_plain(line) for line in output]}")
+
+
+def _json_report(output: list[str]) -> dict:
+    return json.loads("\n".join(output))
 
 
 # --- argument dispatch -------------------------------------------------------
@@ -194,8 +215,10 @@ def test_verification_passes_when_the_agent_runs_and_traffic_is_captured(
     )
 
     assert exit_code == 0
-    assert "Captured LLM request/response pairs: 2" in output
-    assert output[-1].startswith("Verification PASSED.")
+    verdict = _verdict_line(output)
+    assert verdict.startswith("PASS")
+    assert "1/1 cases" in verdict
+    assert "2 model request/response pairs captured" in verdict
 
 
 def test_verification_fails_when_no_model_call_is_captured(repo_root: Path) -> None:
@@ -250,7 +273,9 @@ def test_verification_fails_when_the_agent_cannot_start(repo_root: Path) -> None
     )
 
     assert exit_code == 1
-    assert "did not complete startup" in output[-1]
+    verdict = _verdict_line(output)
+    assert verdict.startswith("FAIL")
+    assert "AgentStartError" in verdict
 
 
 def test_a_poor_judge_status_alone_does_not_fail_verification(
@@ -268,7 +293,7 @@ def test_a_poor_judge_status_alone_does_not_fail_verification(
     )
 
     assert exit_code == 0
-    assert output[-1].startswith("Verification PASSED.")
+    assert _verdict_line(output).startswith("PASS")
 
 
 def test_shared_configuration_failure_fails_verification(repo_root: Path) -> None:
@@ -283,7 +308,7 @@ def test_shared_configuration_failure_fails_verification(repo_root: Path) -> Non
     )
 
     assert exit_code == 1
-    assert "did not complete startup" in output[-1]
+    assert _verdict_line(output).startswith("FAIL")
 
 
 def test_substituted_secrets_are_reported(repo_root: Path) -> None:
@@ -326,13 +351,12 @@ def test_result_log_is_deleted_unless_kept(repo_root: Path) -> None:
         registry_path=_registry_path(repo_root),
         output_fn=output.append,
         offline=_offline(),
+        as_json=True,
     )
 
-    logged = [line for line in output if line.startswith("Result artifact started: ")]
-    assert len(logged) == 1
-    path = Path(logged[0].removeprefix("Result artifact started: "))
-    assert not path.exists()
-    assert not path.parent.exists()
+    report = _json_report(output)
+    assert report["result_log"] is None
+    assert not any("agentbench-verify-" in _plain(line) for line in output)
 
 
 def test_kept_result_log_survives_and_holds_the_suite_summary(repo_root: Path) -> None:
@@ -344,16 +368,37 @@ def test_kept_result_log_survives_and_holds_the_suite_summary(repo_root: Path) -
         keep_artifacts=True,
         output_fn=output.append,
         offline=_offline(),
+        as_json=True,
     )
 
-    kept = [line for line in output if line.startswith("Result log kept: ")]
-    path = Path(kept[0].removeprefix("Result log kept: "))
+    path = Path(_json_report(output)["result_log"])
     try:
         events = [
             json.loads(line)
             for line in path.read_text(encoding="utf-8").splitlines()
         ]
         assert events[-1]["event"] == "suite_completed"
+    finally:
+        path.unlink(missing_ok=True)
+        path.parent.rmdir()
+
+
+def test_kept_result_log_path_is_shown_in_the_human_report(repo_root: Path) -> None:
+    output: list[str] = []
+
+    verify(
+        DOCKER_AGENT_ID,
+        registry_path=_registry_path(repo_root),
+        keep_artifacts=True,
+        output_fn=output.append,
+        offline=_offline(),
+    )
+
+    logged = [_plain(line) for line in output if _plain(line).startswith("log ")]
+    assert len(logged) == 1
+    path = Path(logged[0].removeprefix("log").strip())
+    try:
+        assert path.is_file()
     finally:
         path.unlink(missing_ok=True)
         path.parent.rmdir()

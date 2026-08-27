@@ -201,7 +201,7 @@ The whole run is hermetic:
 
 ```text
 agentbench verify [-h] [--env-file PATH] [--input TEXT] [--inputs N]
-                  [--keep-artifacts] [--llm-trace {off,terminal}]
+                  [--keep-artifacts] [--json] [--llm-trace {off,terminal}]
                   [--llm-trace-max-bytes BYTES] agent_id
 ```
 
@@ -220,6 +220,7 @@ python -m agentbench verify swe-agent --input "@prompts\probe.txt" --keep-artifa
 | `--input TEXT` | No | Short generic prompt | Probe text, or `@PATH` to read it from a file. |
 | `--inputs N` | No | `1` | Number of probe inputs sent in the single Case. |
 | `--keep-artifacts` | No | Delete | Keep the temporary result log and print its path. |
+| `--json` | No | Human report | Print one JSON summary and nothing else. |
 | `--llm-trace {off,terminal}` | No | `off` | Print the sanitized captured model requests and responses. |
 | `--llm-trace-max-bytes BYTES` | No | `262144` | Maximum displayed bytes per request or response. |
 | `-h`, `--help` | No | - | Show `verify` help and exit. |
@@ -248,18 +249,77 @@ Verification passes when all of the following hold:
 - every probe input is invoked without a startup, runtime, or invocation error;
 - at least one complete `llm_request`/`llm_response` pair is captured.
 
-```text
-Captured LLM request/response pairs: 3
-Verification PASSED. Agent 'swe-agent' starts, responds, and its model traffic is fully captured.
-```
-
 A Judge-style report status is irrelevant here. An Agent whose reply is poor still
 passes verification, because the adapter and runtime are what is under test.
 
+### 4.6 Report Layout
+
+The report has four sections: what is being checked, which stages passed, what the
+model exchanged, and the verdict.
+
 ```text
-Captured LLM request/response pairs: 0
-Verification FAILED. Agent 'swe-agent' ran but no model call was captured, so its LLM traffic is not observable.
+verify · langgraph-customer-support-agent
+       offline · no credentials · egress blocked · registry untouched
+
+  ✓  configuration   local providers
+  ✓  agent start     ContainerAgentAdapter
+  ✓  case            offline_d9075725a90…
+  ✓  agent run       2 model calls
+
+     01  ▸ Reply with a short confirmation that you received thi…
+         ◂ Tool: list_available_functions                  200 · 1.4ms
+     02  ▸ Available Functions & Actions - search_vector_knowled…
+         ◂ offline verification reply                      200 · 0.8ms
+
+  PASS   1/1 cases · 2 model request/response pairs captured
 ```
+
+On a terminal the stage currently running is shown as a self-erasing live line, so
+only finished stages remain. Redirected output skips the live line entirely instead
+of writing every animation frame.
+
+A failure leads with the reason rather than a generic message:
+
+```text
+  FAIL   AgentStartError: container exited during startup
+```
+
+Call lists longer than ten are elided in the middle. Stubbed secrets, when any were
+substituted, are listed above the verdict.
+
+### 4.7 Machine-Readable Output
+
+`--json` prints one JSON document and suppresses every other line, so the exit code
+and the document are the whole contract:
+
+```json
+{
+  "command": "verify",
+  "agent_id": "langgraph-customer-support-agent",
+  "verdict": "pass",
+  "exit_code": 0,
+  "cases": {"completed": 1, "requested": 1},
+  "model_calls": {
+    "captured_pairs": 2,
+    "calls": [
+      {
+        "number": 1,
+        "provider": "offline",
+        "status": 200,
+        "latency_ms": 0.963,
+        "request_preview": "Reply with a short confirmation that you received this message.",
+        "response_preview": "Tool: list_available_functions"
+      }
+    ]
+  },
+  "substituted_secrets": [],
+  "result_log": null,
+  "reason": null
+}
+```
+
+`verdict` is `pass`, `fail`, or `error`; `error` covers the preflight rejections in
+section 4.4. `result_log` is populated only with `--keep-artifacts`.
 
 ## 5. `certify`
 
@@ -504,7 +564,11 @@ agentbench/cli/
   result_export.py        append-only JSONL writer
   trace_runtime.py        runner wiring for live provider traffic
   offline_runtime.py      runner wiring for credential-free offline runs
+  verify_report.py        sectioned verify report and JSON summary
   viewer.py               local HTTP viewer server
+  TerminalUI/
+    LLMactivity.py        self-erasing live panel for the current model call
+    call_log.py           completed calls retained for the final report
   features/
     base.py               CommandFeature contract
     __init__.py           FEATURES registry

@@ -11,6 +11,7 @@ It intentionally requires no credentials. If it needs one, that is the bug.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -38,37 +39,38 @@ def main() -> int:
 
     def emit(line: str) -> None:
         lines.append(line)
-        print(line, flush=True)
 
     offline = build_offline_runtime(
         max_inputs=PROBE_COUNT,
         probes=probe_inputs(count=PROBE_COUNT),
         output_fn=emit,
     )
+    # The JSON summary is the contract worth asserting on; the human report is
+    # free to change layout without breaking this check.
     exit_code = verify(
         agent_id,
         input_count=PROBE_COUNT,
         output_fn=emit,
         offline=offline,
+        as_json=True,
     )
+    report = json.loads("\n".join(lines))
 
-    pairs = offline.captured_pair_count
+    print(json.dumps(report, ensure_ascii=False, indent=2))
     print()
     print(f"exit code                  : {exit_code}")
-    print(f"captured request/response  : {pairs}")
-    print(f"substituted secrets        : {offline.substituted_secrets or 'none'}")
+    print(f"captured request/response  : {report['model_calls']['captured_pairs']}")
+    print(f"substituted secrets        : {report['substituted_secrets'] or 'none'}")
 
-    if exit_code != 0:
-        print("offline verification smoke test FAILED")
+    if exit_code != 0 or report["verdict"] != "pass":
+        print(f"offline verification smoke test FAILED: {report.get('reason')}")
         return 1
-    if pairs < PROBE_COUNT:
+    if report["model_calls"]["captured_pairs"] < PROBE_COUNT:
         print(
             f"offline verification smoke test FAILED: expected at least "
-            f"{PROBE_COUNT} captured pairs, saw {pairs}"
+            f"{PROBE_COUNT} captured pairs, saw "
+            f"{report['model_calls']['captured_pairs']}"
         )
-        return 1
-    if not any(line.startswith("Verification PASSED.") for line in lines):
-        print("offline verification smoke test FAILED: missing pass verdict")
         return 1
 
     print("offline verification smoke test passed")

@@ -55,11 +55,15 @@ def test_static_activity_prints_short_request_and_response() -> None:
     )
     activity.finish_stage("OK")
 
-    assert "      Agent > abcdefghijklmnopqrstuvwxyz" in output
-    assert "      Model < waiting..." in output
-    assert "    LLM call 01 | openrouter | 200 | 00:01" in output
-    assert "      Model < response body from the model" in output
-    assert output[-1] == "  OK"
+    # A log cannot redraw, so each call is written exactly once when it finishes:
+    # no in-flight header and no "waiting" placeholder to scroll past.
+    assert output == [
+        "Running Agent inputs and DefuzeX Judge...",
+        "    LLM call 01 | openrouter | 200 | 1250.0ms",
+        "      Agent > abcdefghijklmnopqrstuvwxyz",
+        "      Model < response body from the model",
+        "  OK",
+    ]
 
 
 def test_activity_extracts_responses_input_and_tool_calls() -> None:
