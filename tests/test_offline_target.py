@@ -378,6 +378,250 @@ def test_streaming_responses_request_ends_with_the_complete_response() -> None:
     assert frames[-1]["response"]["output"][0]["type"] == "message"
 
 
+_FORMAT_INSTRUCTIONS = """The output should be formatted as a JSON instance that conforms to the JSON schema below.
+
+As an example, for the schema {"properties": {"foo": {"title": "Foo", "type": "array"}}, "required": ["foo"]} the object {"foo": ["bar"]} is well-formatted.
+
+Here is the output schema:
+```
+{"properties": {"title": {"type": "string"}, "steps": {"items": {"type": "string"}, "type": "array"}}, "required": ["title", "steps"]}
+```"""
+
+
+def test_prompt_embedded_schema_is_answered_with_shaped_json() -> None:
+    """LangChain output parsers state the contract in the prompt, not the request.
+
+    ``JsonOutputParser`` tells the model to emit JSON and parses the reply
+    afterwards, so nothing in the request body declares it. Against canned text
+    those agents fail with OutputParserException.
+    """
+
+    body = _reply(
+        {
+            "messages": [
+                {"role": "system", "content": _FORMAT_INSTRUCTIONS},
+                {"role": "user", "content": "plan the change"},
+            ]
+        }
+    )
+
+    content = json.loads(body["choices"][0]["message"]["content"])
+
+    assert content == {"title": OFFLINE_TEXT, "steps": [OFFLINE_TEXT]}
+
+
+def test_prompt_embedded_schema_ignores_the_illustrative_example() -> None:
+    """The instructions also contain an inline example schema, unfenced.
+
+    Picking the first `{"properties"` in the text would answer with the
+    example's shape instead of the real one.
+    """
+
+    body = _reply({"messages": [{"role": "user", "content": _FORMAT_INSTRUCTIONS}]})
+
+    assert "foo" not in json.loads(body["choices"][0]["message"]["content"])
+
+
+def test_prompt_without_the_sentinel_is_left_alone() -> None:
+    body = _reply(
+        {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": 'Return JSON like {"properties": {"a": {"type": "string"}}}',
+                }
+            ]
+        }
+    )
+
+    assert body["choices"][0]["message"]["content"] == OFFLINE_TEXT
+
+
+def test_a_declared_tool_still_wins_over_a_prompt_schema() -> None:
+    body = _reply(
+        {
+            "messages": [{"role": "user", "content": _FORMAT_INSTRUCTIONS}],
+            "tools": [
+                {"type": "function", "function": {"name": "search", "parameters": {}}}
+            ],
+        }
+    )
+
+    assert body["choices"][0]["finish_reason"] == "tool_calls"
+
+
+@pytest.mark.parametrize(
+    ("protocol_plugin", "payload_key"),
+    [("openai-responses", "input"), ("anthropic-messages", "messages")],
+)
+def test_prompt_embedded_schema_is_honoured_on_every_protocol(
+    protocol_plugin: str, payload_key: str
+) -> None:
+    body = _reply(
+        {payload_key: [{"role": "user", "content": _FORMAT_INSTRUCTIONS}]},
+        protocol_plugin=protocol_plugin,
+    )
+
+    text = (
+        body["output"][0]["content"][0]["text"]
+        if protocol_plugin == "openai-responses"
+        else body["content"][0]["text"]
+    )
+
+    assert json.loads(text) == {"title": OFFLINE_TEXT, "steps": [OFFLINE_TEXT]}
+
+
+def test_array_placeholders_carry_one_element() -> None:
+    """An empty list satisfies the schema but breaks agents that read items[0]."""
+
+    body = _reply(
+        {
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "plan",
+                        "parameters": {
+                            "type": "object",
+                            "required": ["steps"],
+                            "properties": {
+                                "steps": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "required": ["action"],
+                                        "properties": {"action": {"type": "string"}},
+                                    },
+                                }
+                            },
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    call = body["choices"][0]["message"]["tool_calls"][0]["function"]
+    arguments = json.loads(call["arguments"])
+
+    assert arguments["steps"] == [{"action": OFFLINE_TEXT}]
+
+
+def test_deeply_nested_schema_placeholders_are_bounded() -> None:
+    """The array placeholder recurses, so nesting must terminate."""
+
+    node: dict[str, object] = {"type": "string"}
+    for _ in range(12):
+        node = {"type": "array", "items": node}
+
+    body = _reply(
+        {
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "deep",
+                        "parameters": {
+                            "type": "object",
+                            "required": ["tree"],
+                            "properties": {"tree": node},
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    value = json.loads(
+        body["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+    )["tree"]
+
+    depth = 0
+    while isinstance(value, list) and value:
+        depth += 1
+        value = value[0]
+
+    assert depth <= 12
+
+
+def test_nested_model_refs_are_resolved() -> None:
+    """Pydantic emits nested models as $ref into $defs.
+
+    Without resolving them a nested object looks untyped and gets a string
+    placeholder, which then fails the agent's own validation.
+    """
+
+    body = _reply(
+        {
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "plan",
+                        "parameters": {
+                            "$defs": {
+                                "Task": {
+                                    "type": "object",
+                                    "required": ["action"],
+                                    "properties": {"action": {"type": "string"}},
+                                }
+                            },
+                            "type": "object",
+                            "required": ["tasks"],
+                            "properties": {
+                                "tasks": {
+                                    "type": "array",
+                                    "items": {"$ref": "#/$defs/Task"},
+                                }
+                            },
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    arguments = json.loads(
+        body["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+    )
+
+    assert arguments["tasks"] == [{"action": OFFLINE_TEXT}]
+
+
+def test_optional_fields_answer_the_non_null_branch() -> None:
+    body = _reply(
+        {
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "maybe",
+                        "parameters": {
+                            "type": "object",
+                            "required": ["count"],
+                            "properties": {
+                                "count": {
+                                    "anyOf": [{"type": "integer"}, {"type": "null"}]
+                                }
+                            },
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    arguments = json.loads(
+        body["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+    )
+
+    assert arguments == {"count": 0}
+
+
 def test_non_streaming_request_still_gets_json() -> None:
     body = _reply({"messages": [{"role": "user", "content": "hi"}]})
 

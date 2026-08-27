@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -21,6 +22,9 @@ OFFLINE_TEXT = "offline verification reply"
 _JSON_HEADERS = {"Content-Type": "application/json"}
 _SSE_HEADERS = {"Content-Type": "text/event-stream", "Cache-Control": "no-store"}
 _TOOL_CALL_PREFIX = "call_offline_verify"
+# Fixed text emitted by LangChain output parsers ahead of the schema block.
+_SCHEMA_SENTINEL = "Here is the output schema"
+_FENCED_JSON = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 
 
 class OfflineResponseError(ValueError):
@@ -181,10 +185,45 @@ def _first_tool(payload: Mapping[str, Any]) -> tuple[str, dict[str, Any]] | None
     return None
 
 
-def _arguments_for(schema: object) -> dict[str, Any]:
+_MAX_SCHEMA_DEPTH = 4
+
+
+def _resolve(field: object, root: Mapping[str, Any] | None) -> object:
+    """Follow local `$ref` pointers so nested models get their real shape.
+
+    Pydantic emits nested models as `$ref` into `$defs`, so a field that looks
+    untyped is often a whole object. Only in-document pointers are followed;
+    the mock never fetches a schema.
+    """
+
+    for _ in range(_MAX_SCHEMA_DEPTH + 1):
+        if not isinstance(field, dict):
+            return field
+        reference = field.get("$ref")
+        if not isinstance(reference, str) or not reference.startswith("#/"):
+            return field
+        if root is None:
+            return field
+        node: object = root
+        for part in reference[2:].split("/"):
+            if not isinstance(node, dict):
+                return field
+            node = node.get(part)
+        if node is None:
+            return field
+        field = node
+    return field
+
+
+def _arguments_for(
+    schema: object, depth: int = 0, root: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
     """Fill a JSON Schema's required properties with type-appropriate placeholders."""
 
-    if not isinstance(schema, dict):
+    if root is None and isinstance(schema, dict):
+        root = schema
+    schema = _resolve(schema, root)
+    if not isinstance(schema, dict) or depth > _MAX_SCHEMA_DEPTH:
         return {}
     properties = schema.get("properties")
     required = schema.get("required")
@@ -196,18 +235,32 @@ def _arguments_for(schema: object) -> dict[str, Any]:
         else list(properties)
     )
     return {
-        name: _placeholder(properties.get(name))
+        name: _placeholder(properties.get(name), depth + 1, root)
         for name in names
         if name in properties
     }
 
 
-def _placeholder(field: object) -> Any:
+def _placeholder(
+    field: object, depth: int = 0, root: Mapping[str, Any] | None = None
+) -> Any:
+    field = _resolve(field, root)
     if not isinstance(field, dict):
         return OFFLINE_TEXT
     choices = field.get("enum")
     if isinstance(choices, list) and choices:
         return choices[0]
+
+    # Optional fields arrive as anyOf[..., {"type": "null"}]; answer the first
+    # branch that is not null rather than treating the field as untyped.
+    for key in ("anyOf", "oneOf", "allOf"):
+        branches = field.get(key)
+        if isinstance(branches, list):
+            for branch in branches:
+                resolved = _resolve(branch, root)
+                if isinstance(resolved, dict) and resolved.get("type") != "null":
+                    return _placeholder(resolved, depth, root)
+
     kind = field.get("type")
     if isinstance(kind, list):
         kind = next((item for item in kind if item != "null"), "string")
@@ -218,10 +271,69 @@ def _placeholder(field: object) -> Any:
     if kind == "number":
         return 0.0
     if kind == "array":
-        return []
-    if kind == "object":
-        return _arguments_for(field)
+        # One element rather than none. An empty list satisfies the schema but
+        # is not what a model would return, and agents that go straight to
+        # `items[0]` fail on it — a startup check should not turn into an
+        # IndexError. Nesting is bounded so a recursive schema cannot spin.
+        if depth > _MAX_SCHEMA_DEPTH:
+            return []
+        return [_placeholder(field.get("items"), depth + 1, root)]
+    if kind == "object" or isinstance(field.get("properties"), dict):
+        return _arguments_for(field, depth, root)
     return OFFLINE_TEXT
+
+
+def _prompt_text(payload: Mapping[str, Any]) -> str:
+    """Concatenate the text the Agent put in front of the model."""
+
+    parts: list[str] = []
+
+    def walk(value: object) -> None:
+        if isinstance(value, str):
+            parts.append(value)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+        elif isinstance(value, dict):
+            for key in ("content", "text", "input", "messages", "system"):
+                if key in value:
+                    walk(value[key])
+
+    for key in ("messages", "input", "system", "prompt"):
+        if key in payload:
+            walk(payload[key])
+    return "\n".join(parts)
+
+
+def _prompt_schema(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Recover a JSON schema that the Agent embedded in its prompt.
+
+    LangChain's ``JsonOutputParser`` and ``PydanticOutputParser`` state the
+    contract in the prompt rather than in the request: the model is told to emit
+    JSON and the reply is parsed afterwards, so nothing in the request body
+    declares it. Against a canned text reply those agents fail with
+    ``OutputParserException``.
+
+    The instructions those parsers generate are fixed text ending in a fenced
+    block that holds the schema, so the schema can be recovered exactly rather
+    than guessed. Anything that does not carry both the sentinel and a parsable
+    schema object is left alone.
+    """
+
+    text = _prompt_text(payload)
+    marker = text.rfind(_SCHEMA_SENTINEL)
+    if marker == -1:
+        return None
+    fenced = _FENCED_JSON.search(text, marker)
+    if fenced is None:
+        return None
+    try:
+        schema = json.loads(fenced.group(1))
+    except json.JSONDecodeError:
+        return None
+    if isinstance(schema, dict) and isinstance(schema.get("properties"), dict):
+        return schema
+    return None
 
 
 def _structured_content(payload: Mapping[str, Any]) -> str | None:
@@ -233,6 +345,19 @@ def _structured_content(payload: Mapping[str, Any]) -> str | None:
     schema = response_format.get("json_schema")
     if isinstance(schema, dict):
         schema = schema.get("schema", schema)
+    return json.dumps(_arguments_for(schema), ensure_ascii=False)
+
+
+def _prompt_schema_content(payload: Mapping[str, Any]) -> str | None:
+    """Answer a schema the Agent stated in its prompt rather than its request.
+
+    Ranked below a declared tool: an Agent that bound tools is waiting for a
+    tool call, and the parser contract only applies to a free-text turn.
+    """
+
+    schema = _prompt_schema(payload)
+    if schema is None:
+        return None
     return json.dumps(_arguments_for(schema), ensure_ascii=False)
 
 
@@ -261,7 +386,10 @@ def _openai_chat(payload: Mapping[str, Any], model: str, token: str) -> dict[str
         }
         finish_reason = "tool_calls"
     else:
-        message = {"role": "assistant", "content": OFFLINE_TEXT}
+        message = {
+            "role": "assistant",
+            "content": _prompt_schema_content(payload) or OFFLINE_TEXT,
+        }
         finish_reason = "stop"
 
     return {
@@ -278,7 +406,22 @@ def _openai_responses(
     payload: Mapping[str, Any], model: str, token: str
 ) -> dict[str, Any]:
     tool = None if _has_tool_result(payload.get("input")) else _first_tool(payload)
-    if tool is not None:
+    structured = (
+        (_structured_content(payload) or _prompt_schema_content(payload))
+        if tool is None
+        else None
+    )
+    if structured is not None:
+        output: list[dict[str, Any]] = [
+            {
+                "type": "message",
+                "id": f"msg_defuzex_offline_{token}",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{"type": "output_text", "text": structured}],
+            }
+        ]
+    elif tool is not None:
         name, arguments = tool
         call_id = f"{_TOOL_CALL_PREFIX}_{token}"
         output: list[dict[str, Any]] = [
@@ -315,9 +458,18 @@ def _anthropic_messages(
     payload: Mapping[str, Any], model: str, token: str
 ) -> dict[str, Any]:
     tool = None if _has_tool_result(payload.get("messages")) else _first_tool(payload)
-    if tool is not None:
+    content: list[dict[str, Any]]
+    if tool is None:
+        text = (
+            _structured_content(payload)
+            or _prompt_schema_content(payload)
+            or OFFLINE_TEXT
+        )
+        content = [{"type": "text", "text": text}]
+        stop_reason = "end_turn"
+    else:
         name, arguments = tool
-        content: list[dict[str, Any]] = [
+        content = [
             {
                 "type": "tool_use",
                 "id": f"{_TOOL_CALL_PREFIX}_{token}",
@@ -326,9 +478,6 @@ def _anthropic_messages(
             }
         ]
         stop_reason = "tool_use"
-    else:
-        content = [{"type": "text", "text": OFFLINE_TEXT}]
-        stop_reason = "end_turn"
     return {
         "id": f"msg-defuzex-offline-{token}",
         "type": "message",
