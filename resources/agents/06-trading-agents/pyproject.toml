@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trading-agents-benchmark"
+version = "0.1.0"
+description = "AgentBench adaptation of the TauricResearch/TradingAgents multi-agent trading pipeline."
+requires-python = ">=3.11"
+# Upstream declares 22 dependencies. The CLI-only and backtesting packages
+# (typer, questionary, rich, tqdm, backtrader, redis, parsel, alpha-vantage
+# helpers) are not imported by the selected graph, so they are omitted; every
+# package below is reached by a real import from `tradingagents`.
+dependencies = [
+    "langgraph>=1.0,<2",
+    "langgraph-checkpoint-sqlite>=2.0",
+    "langchain-core>=1.0,<2",
+    "langchain-openai>=1.0,<2",
+    "pandas>=2.2",
+    "stockstats>=0.6.5",
+    "yfinance>=0.2.60",
+    "requests>=2.32",
+    "python-dateutil>=2.9",
+    "python-dotenv>=1.0,<2",
+    "pydantic>=2.7",
+    "typing-extensions>=4.14",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["tradingagents*", "trading_agents_benchmark*", "benchmark_mocks*"]

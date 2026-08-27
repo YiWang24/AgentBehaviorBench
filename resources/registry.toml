@@ -44,3 +44,12 @@ status = "ready"
 framework = "langgraph"
 source = "https://github.com/SWE-agent/SWE-agent"
 case = 1
+
+[[agents]]
+agent_id = "trading-agents"
+path = "resources/agents/06-trading-agents"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/TauricResearch/TradingAgents"
+case = 1
