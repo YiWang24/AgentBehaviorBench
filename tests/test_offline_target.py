@@ -825,3 +825,134 @@ def test_offline_target_rejects_an_unsupported_source_protocol() -> None:
         OFFLINE_MOCK_TARGET.prepare_request(
             FakeRequest(), route=_route("json-http"), target=_target()
         )
+
+
+class TestJsonObjectMode:
+    """`response_format: {"type": "json_object"}` declares no schema.
+
+    An empty object parses but carries none of the fields the Agent then reads,
+    so the prompt — the only place the shape is stated — is consulted instead.
+    """
+
+    def test_uses_braced_example_from_prompt(self):
+        payload = {
+            "model": "gpt-4o",
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "Reply in json using this format:\n"
+                        '{"next_agent": "planner", "reason": "why"}'
+                    ),
+                }
+            ],
+        }
+        reply = json.loads(_reply(payload)["choices"][0]["message"]["content"])
+        assert reply["next_agent"] == "planner"
+        assert reply["reason"] == "why"
+
+    def test_recovers_example_written_without_braces(self):
+        payload = {
+            "model": "gpt-4o",
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {
+                    "role": "user",
+                    "content": (
+                        "you must provide your response in the following json "
+                        'format:\n\n    "next_agent": "one of: planner/selector"\n'
+                    ),
+                }
+            ],
+        }
+        reply = json.loads(_reply(payload)["choices"][0]["message"]["content"])
+        assert reply == {"next_agent": "one of: planner/selector"}
+
+    def test_declared_schema_still_wins_over_prompt(self):
+        payload = {
+            "model": "gpt-4o",
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {"verdict": {"type": "string"}},
+                        "required": ["verdict"],
+                    }
+                },
+            },
+            "messages": [
+                {"role": "user", "content": 'json format: {"next_agent": "planner", "x": 1}'}
+            ],
+        }
+        reply = json.loads(_reply(payload)["choices"][0]["message"]["content"])
+        assert "verdict" in reply
+        assert "next_agent" not in reply
+
+    def test_json_object_without_any_example_stays_an_object(self):
+        payload = {
+            "model": "gpt-4o",
+            "response_format": {"type": "json_object"},
+            "messages": [{"role": "user", "content": "Reply in json."}],
+        }
+        reply = json.loads(_reply(payload)["choices"][0]["message"]["content"])
+        assert isinstance(reply, dict)
+
+
+class TestJsonObjectExampleRanking:
+    """A prompt can carry an earlier turn's JSON and this turn's contract.
+
+    Prompts state the contract last, immediately before the model answers, so
+    the latest example wins — including one written without braces.
+    """
+
+    def test_contract_after_quoted_work_wins(self):
+        payload = {
+            "model": "gpt-4o",
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {
+                    "role": "user",
+                    "content": (
+                        "Here is the feedback from the reviewer:\n"
+                        '{"pass_review": false, "comments": "needs another source"}\n\n'
+                        "you must provide your response in the following json format:\n"
+                        '    "next_agent": "one of: planner/selector/reporter"\n'
+                    ),
+                }
+            ],
+        }
+        reply = json.loads(_reply(payload)["choices"][0]["message"]["content"])
+        assert reply == {"next_agent": "one of: planner/selector/reporter"}
+
+    def test_pairs_inside_a_braced_object_are_not_double_counted(self):
+        payload = {
+            "model": "gpt-4o",
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {
+                    "role": "user",
+                    "content": 'Reply in json like {"a": "1", "b": "2"}',
+                }
+            ],
+        }
+        reply = json.loads(_reply(payload)["choices"][0]["message"]["content"])
+        assert reply == {"a": "1", "b": "2"}
+
+    def test_later_braced_example_wins_over_earlier_one(self):
+        payload = {
+            "model": "gpt-4o",
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {
+                    "role": "user",
+                    "content": (
+                        'Previously you said {"old": 1, "stale": 2}.\n'
+                        'Now reply in json as {"fresh": "yes", "done": true}'
+                    ),
+                }
+            ],
+        }
+        reply = json.loads(_reply(payload)["choices"][0]["message"]["content"])
+        assert reply == {"fresh": "yes", "done": True}

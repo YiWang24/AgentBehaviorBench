@@ -12,7 +12,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from .config import Route, Target
 
@@ -345,13 +345,27 @@ def _structured_content(payload: Mapping[str, Any]) -> str | None:
     schema = response_format.get("json_schema")
     if isinstance(schema, dict):
         schema = schema.get("schema", schema)
+        return json.dumps(_arguments_for(schema), ensure_ascii=False)
+
+    if response_format.get("type") == "json_object":
+        # `json_object` mode says a JSON reply is wanted but not which one, so
+        # the request alone cannot describe the shape. The prompt is then the
+        # only place the Agent stated its contract; an empty object parses but
+        # is missing every field the Agent is about to read.
+        example = _prompt_example(payload, require_free_turn=False)
+        if example is not None:
+            return json.dumps(example, ensure_ascii=False)
     return json.dumps(_arguments_for(schema), ensure_ascii=False)
 
 
-def _json_objects(text: str) -> list[dict[str, Any]]:
-    """Every balanced `{...}` region in `text` that parses as a JSON object."""
+def _json_objects(text: str) -> list[tuple[int, dict[str, Any]]]:
+    """Every balanced `{...}` region in `text` that parses as a JSON object.
 
-    found: list[dict[str, Any]] = []
+    Each entry carries the offset the region started at, so callers can rank
+    examples by where they appear in the prompt.
+    """
+
+    found: list[tuple[int, dict[str, Any]]] = []
     depth = 0
     start = -1
     for index, character in enumerate(text):
@@ -368,12 +382,14 @@ def _json_objects(text: str) -> list[dict[str, Any]]:
                     pass
                 else:
                     if isinstance(parsed, dict):
-                        found.append(parsed)
+                        found.append((start, parsed))
                 start = -1
     return found
 
 
-def _prompt_example(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+def _prompt_example(
+    payload: Mapping[str, Any], *, require_free_turn: bool = True
+) -> dict[str, Any] | None:
     """Recover a reply template the Agent wrote into its own prompt.
 
     Many agents state their contract by example rather than by schema — "return
@@ -386,13 +402,66 @@ def _prompt_example(payload: Mapping[str, Any]) -> dict[str, Any] | None:
     and the request declares neither tools nor a response format. The example is
     returned as written — it is exactly what the Agent said a good reply looks
     like, including any flags it set to keep a loop from running again.
+
+    `require_free_turn` relaxes the last condition for `json_object` mode,
+    where a response format is declared but carries no schema.
     """
 
     text = _prompt_text(payload)
     if "json" not in text.lower():
         return None
-    candidates = [obj for obj in _json_objects(text) if len(obj) > 1]
-    return candidates[-1] if candidates else None
+    braced = [(start, obj) for start, obj in _json_objects(text) if len(obj) > 1]
+    if require_free_turn:
+        return braced[-1][1] if braced else None
+
+    # In `json_object` mode the prompt often carries two kinds of object: work
+    # quoted back from an earlier turn, and the contract for *this* reply.
+    # Prompts state the contract last, immediately before the model answers, so
+    # the latest example wins — including one written without its enclosing
+    # braces, which is common:
+    #
+    #     you must provide your response in the following json format:
+    #         "next_agent": "one of planner/selector/reporter"
+    candidates = list(braced)
+    spans = [(start, start + len(json.dumps(obj))) for start, obj in braced]
+    loose = _brace_less_example(text, exclude=spans)
+    if loose is not None:
+        candidates.append(loose)
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: item[0])[1]
+
+
+_PAIR = re.compile(r'"([A-Za-z_][A-Za-z0-9_ -]*)"\s*:\s*("(?:[^"\\]|\\.)*"|true|false|null|-?\d+(?:\.\d+)?)')
+
+
+def _brace_less_example(
+    text: str, *, exclude: Sequence[tuple[int, int]] = ()
+) -> tuple[int, dict[str, Any]] | None:
+    """Recover `"key": value` pairs written without enclosing braces.
+
+    Pairs inside a region already recognised as a braced object are skipped,
+    so an object quoted from an earlier turn is not double-counted. Returns the
+    offset of the first surviving pair alongside the recovered object, so the
+    caller can rank it against braced candidates by position.
+    """
+
+    recovered: dict[str, Any] = {}
+    offset = -1
+    for match in _PAIR.finditer(text):
+        start = match.start()
+        if any(low <= start < high for low, high in exclude):
+            continue
+        try:
+            value = json.loads(match.group(2))
+        except json.JSONDecodeError:
+            continue
+        if offset < 0:
+            offset = start
+        recovered[match.group(1)] = value
+    if not recovered:
+        return None
+    return offset, recovered
 
 
 def _prompt_schema_content(payload: Mapping[str, Any]) -> str | None:
