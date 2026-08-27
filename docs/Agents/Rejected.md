@@ -108,17 +108,89 @@ Reconsider when: upstream relicenses under a permissive software license. CC
   NonCommercial term.
 ```
 
+A missing `LICENSE` file is not decisive on its own — a licence declared in the
+README or in `pyproject.toml` is still an explicit grant, and several
+candidates were nearly rejected on that mistake. The repositories below carry
+no licence statement anywhere: no licence file, no README declaration, no
+package metadata. The default is then all rights reserved and the source may
+not be redistributed.
+
 ```text
-Agent rejected: FinchainAgent, Paper-Agent, MultiAgenticRAG
+Agent rejected: no licence declared anywhere
 Requirement: R8
 Reason code: SOURCE_OR_LICENSE_MISSING
-Reason: No license file of any kind, so the default is all rights reserved and
-  the source may not be redistributed.
+Reason: No licence file, no README licence statement, and no licence field in
+  package metadata.
+Evidence (repository @ reviewed revision):
+  - ZhangJinHaHaHa/FinchainAgent @ f6f04ed
+  - Tswoen/Paper-Agent @ c68778f
+  - nicoladisabato/MultiAgenticRAG @ 05cc844
+  - kaymen99/Upwork-AI-jobs-applier @ 074dc0d
+  - kaymen99/sales-outreach-automation-langgraph @ 2e2761c
+  - kaymen99/local-rag-researcher-deepseek @ 98e8382
+  - kaymen99/langgraph-email-automation @ 9ea0f54
+  - ro-anderson/multi-agent-rag-customer-support @ 86b17b6
+  - Nachoeigu/agentic-customer-service-medical-clinic @ b76b8e7
+  - KRATSZ/LabScript-AI @ 747db2c
+  - seanlxh/Air-Lingjing @ d23060c
+  - zamalali/DeepGit @ 940c14e
+  - Lyra-stellAI/BYO-LLM-WIKI @ 0316fb7
+  - nuglifeleoji/Options-Analytics-Agent @ 9de22c3
+  Checked in each case: `licen[cs]e*` in the repository root, a licence
+  statement in README.md, and `project.license` / licence classifiers in
+  pyproject.toml.
+Reconsider when: upstream adds a permissive licence. Several of these are
+  otherwise plausible adaptations.
+```
+
+---
+
+## Copyleft
+
+```text
+Agent rejected: tevslin/meeting-reporter, XD-MHLOO/Osintgraph
+Requirement: R8
+Reason code: SOURCE_OR_LICENSE_MISSING
+Reason: Both are GPL. Vendoring a snapshot into this repository is
+  redistribution, and the copyleft terms would extend to the benchmark, which
+  is MIT. This is a licensing-policy call rather than a technical one and a
+  maintainer may overrule it.
 Evidence:
-  - Reviewed revisions: FinchainAgent f6f04ed, Paper-Agent c68778f,
-    MultiAgenticRAG 05cc844.
-  - No file matching `licen[cs]e*` in any of the three repositories.
-  - Each is otherwise plausible: FinchainAgent compiles a workflow in main.py,
-    Paper-Agent and MultiAgenticRAG both build module-level graphs.
-Reconsider when: upstream adds a permissive license.
+  - tevslin/meeting-reporter @ 525f6bb, XD-MHLOO/Osintgraph @ c9bbcab; both
+    ship a GNU General Public License.
+  - meeting-reporter additionally has no module-level graph (R3).
+Reconsider when: a maintainer decides copyleft vendoring is acceptable, or the
+  agents are run from an unvendored checkout rather than copied into
+  `resources/agents/`.
+```
+
+---
+
+## Already reviewed under another name
+
+```text
+Agent rejected: agruai/company-research-agent
+Requirement: R1 (model interception boundary)
+Reason code: UNSUPPORTED_MODEL_PROTOCOL
+Reason: A fork of guy-hartstein/company-research-agent at the same revision
+  (52c904c). The Gemini dependency described above applies unchanged.
+Reconsider when: the same condition as the upstream entry.
+```
+
+---
+
+## No stable entry point
+
+```text
+Agent rejected: rotemweiss57/gpt-newspaper
+Requirement: R3
+Reason code: INVALID_ENTRYPOINT
+Reason: The workflow is compiled inside a function with no module-level
+  attribute and no langgraph.json, so there is no stable `file.py:attribute`
+  entry point.
+Evidence:
+  - Reviewed revision: b86aff2; `workflow.compile()` appears only inside
+    `backend/langgraph_agent.py`.
+Reconsider when: upstream exposes the compiled graph, or a maintainer accepts a
+  benchmark-side factory that reaches into the private builder.
 ```
