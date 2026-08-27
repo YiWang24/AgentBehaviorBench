@@ -111,3 +111,12 @@ status = "adapting"
 framework = "langgraph"
 source = "https://github.com/bernatsampera/event-deep-research"
 case = 1
+
+[[agents]]
+agent_id = "clinical-pipeline"
+path = "resources/agents/13-clinical-pipeline"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/bcefghj/medical-multi-agent-system"
+case = 1
