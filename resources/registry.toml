@@ -174,3 +174,12 @@ status = "adapting"
 framework = "langgraph"
 source = "https://github.com/nirbar1985/ai-travel-agent"
 case = 1
+
+[[agents]]
+agent_id = "anima"
+path = "resources/agents/20-anima"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/Fullive-AI/Anima"
+case = 1

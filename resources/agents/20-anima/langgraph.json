@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "anima_chat": "./src/anima_benchmark/runtime.py:graph"
+  },
+  "env": ".env"
+}
