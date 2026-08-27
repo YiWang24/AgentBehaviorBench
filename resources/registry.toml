@@ -264,3 +264,12 @@ status = "adapting"
 framework = "langgraph"
 source = "https://github.com/FeiCoder/BreadFree-Simu"
 case = 1
+
+[[agents]]
+agent_id = "mcp-agent"
+path = "resources/agents/30-mcp-agent"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/braincrew-lab/langgraph-mcp-agents"
+case = 1

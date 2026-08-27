@@ -376,6 +376,10 @@ Reason: No `StateGraph` construction and no graph factory exists outside tests,
 Evidence (repository @ reviewed revision):
   - ShenSeanChen/waku-agent @ 680f64a
   - test-zeus-ai/testzeus-hercules @ fa2b469 (also AGPL-3.0, see Copyleft)
+  - Yourdaylight/stock_datasource @ f180446 — a data platform, not an agent.
+    `langgraph` appears only as a string in a runtime-selector column
+    (`agent_config_service.py`) and in a demo's module-mocking list; no
+    `StateGraph` is constructed and no graph factory exists.
   - togethercomputer/open_deep_research @ 66e43b4 — the agent is a custom
     loop in `src/together_open_deep_research.py`, not a LangGraph graph.
     `langgraph` appears only inside `src/libs/utils/agent_factory.py`, which
