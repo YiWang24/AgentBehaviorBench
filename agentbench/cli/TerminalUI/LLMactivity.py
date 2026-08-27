@@ -73,6 +73,12 @@ class LLMActivity:
         self._call_count = 0
         self._rendered_line_count = 0
 
+    @property
+    def live(self) -> bool:
+        """Whether this panel redraws itself, i.e. owns the terminal."""
+
+        return self._live_updates
+
     def start_stage(self, label: str) -> None:
         """Start the benchmark stage line and its shared animation loop."""
 

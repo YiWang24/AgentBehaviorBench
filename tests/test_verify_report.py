@@ -16,7 +16,7 @@ from agentbench.cli.verify_report import (
     truncate,
 )
 from agentbench.harness import BenchmarkProgress
-from agentbench.runtime.interception import TraceEvent
+from agentbench.runtime.interception import TerminalTraceSink, TraceEvent
 from agentbench.cli.constants import ANSI_CYAN
 
 
@@ -308,6 +308,51 @@ def test_failed_stage_is_marked_and_remembered() -> None:
     assert _plain(output[0]).strip().startswith("✗  agent start")
     assert "DockerRuntimeError" in _plain(output[0])
     assert progress.failed
+
+
+def test_terminal_trace_omits_a_source_identical_to_its_destination() -> None:
+    """A target that answers the call itself never rewrites the address."""
+
+    output: list[str] = []
+    TerminalTraceSink(output.append).emit(
+        TraceEvent(
+            "llm_request",
+            {
+                "call_id": "call-1",
+                "route_id": "openai-chat",
+                "provider": "offline",
+                "method": "POST",
+                "host": "api.openai.com",
+                "path": "/v1/chat/completions",
+                "source_host": "api.openai.com",
+                "source_path": "/v1/chat/completions",
+            },
+        )
+    )
+
+    assert "source=" not in output[0]
+    assert "api.openai.com/v1/chat/completions" in output[0]
+
+
+def test_terminal_trace_keeps_a_source_that_was_rewritten() -> None:
+    output: list[str] = []
+    TerminalTraceSink(output.append).emit(
+        TraceEvent(
+            "llm_request",
+            {
+                "call_id": "call-1",
+                "route_id": "openai-chat",
+                "provider": "openrouter",
+                "method": "POST",
+                "host": "openrouter.ai",
+                "path": "/api/v1/chat/completions",
+                "source_host": "api.openai.com",
+                "source_path": "/v1/chat/completions",
+            },
+        )
+    )
+
+    assert "source=api.openai.com/v1/chat/completions" in output[0]
 
 
 def test_single_model_call_is_not_pluralized() -> None:

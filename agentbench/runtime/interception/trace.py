@@ -99,10 +99,11 @@ class TerminalTraceSink:
         direction = "REQUEST" if event.event == "llm_request" else "RESPONSE"
         source = ""
         if data.get("source_host"):
-            source = (
-                f" source={data.get('source_host', '')}"
-                f"{data.get('source_path', '')}"
-            )
+            origin = f"{data.get('source_host', '')}{data.get('source_path', '')}"
+            # A target that serves the call itself never rewrites the address, so
+            # repeating it would double the line without adding anything.
+            if origin != f"{data.get('host', '')}{data.get('path', '')}":
+                source = f" source={origin}"
         self.output_fn(
             f"[LLM TRACE {direction}] call={call_id} route={route} "
             f"provider={data.get('provider', '-')} "

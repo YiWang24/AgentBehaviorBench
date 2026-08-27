@@ -14,10 +14,7 @@ from agentbench.harness import BenchmarkSuiteResult, SuiteAgentResult
 from agentbench.harness.offline import DEFAULT_PROBE_TEXT, probe_inputs
 from agentbench.harness.registry import AgentRegistration, load_registry
 from agentbench.runtime.agentcontainer import runtime_type
-from agentbench.runtime.interception import (
-    DEFAULT_TRACE_MAX_BYTES,
-    InterceptionConfig,
-)
+from agentbench.runtime.interception import InterceptionConfig
 
 from agentbench.cli.environment import load_project_environment
 from agentbench.cli.execution import BenchmarkExecution, run_benchmark_once
@@ -39,6 +36,11 @@ from .run import DEFAULT_REGISTRY_PATH
 DEFAULT_INPUT_COUNT = 1
 ARTIFACT_PREFIX = "agentbench-verify-"
 INPUT_FILE_MARKER = "@"
+
+# The shared 256 KiB budget exists to capture real provider traffic in full. A
+# startup check only needs enough of each payload to recognise it, and an Agent
+# that resends a long system prompt every turn would otherwise bury the report.
+VERIFY_TRACE_MAX_BYTES = 2048
 
 
 def configure_parser(parser: ArgumentParser) -> None:
@@ -83,9 +85,12 @@ def configure_parser(parser: ArgumentParser) -> None:
     parser.add_argument(
         "--llm-trace-max-bytes",
         type=int,
-        default=DEFAULT_TRACE_MAX_BYTES,
+        default=VERIFY_TRACE_MAX_BYTES,
         metavar="BYTES",
-        help="Maximum captured payload bytes displayed per direction.",
+        help=(
+            "Maximum captured payload bytes shown per direction with "
+            f"--llm-trace. Defaults to {VERIFY_TRACE_MAX_BYTES}."
+        ),
     )
 
 
@@ -101,7 +106,7 @@ def execute(args: Namespace) -> int:
         kwargs["probe_text"] = _probe_text(args.input)
     if args.llm_trace != "off":
         kwargs["llm_trace"] = args.llm_trace
-    if args.llm_trace_max_bytes != DEFAULT_TRACE_MAX_BYTES:
+    if args.llm_trace_max_bytes != VERIFY_TRACE_MAX_BYTES:
         kwargs["llm_trace_max_bytes"] = args.llm_trace_max_bytes
     return verify(args.agent_id, **kwargs)
 
@@ -116,7 +121,7 @@ def verify(
     output_fn: Callable[[str], None] = print,
     offline: OfflineRuntime | None = None,
     llm_trace: str = "off",
-    llm_trace_max_bytes: int = DEFAULT_TRACE_MAX_BYTES,
+    llm_trace_max_bytes: int = VERIFY_TRACE_MAX_BYTES,
     as_json: bool = False,
 ) -> int:
     """Start one Agent offline and confirm its model traffic is observable.

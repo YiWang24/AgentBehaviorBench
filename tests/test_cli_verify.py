@@ -28,7 +28,12 @@ from agentbench.harness.offline import (
 from agentbench.cli.presentation import ANSI_PATTERN
 from agentbench.cli.TerminalUI.call_log import CallRecorder
 from agentbench.harness.runner.benchmark_runner import BenchmarkRunner
-from agentbench.runtime.interception import InterceptionTraceState, TraceEvent
+from agentbench.cli.TerminalUI import LLMActivity
+from agentbench.runtime.interception import (
+    InterceptionTraceState,
+    TerminalTraceSink,
+    TraceEvent,
+)
 from tests.test_cli import FakeSuiteRunner
 
 DOCKER_AGENT_ID = "langgraph-customer-support-agent"
@@ -450,6 +455,44 @@ def test_official_mode_would_have_tripped_the_poisoned_environment(
 
     with pytest.raises(AssertionError, match="read DEFUZEX_API_KEY"):
         runner.validate_defuzex(starter_agent, allow_local=True, track_files=False)
+
+
+def test_requested_llm_trace_reaches_output_when_no_live_panel_owns_the_terminal() -> None:
+    """A silenced live panel must not swallow a trace the caller asked for."""
+
+    written: list[str] = []
+    silent_panel = LLMActivity(lambda _: None, live_updates=False)
+
+    build_offline_runtime(
+        max_inputs=1,
+        probes=probe_inputs(count=1),
+        output_fn=written.append,
+        llm_trace="terminal",
+        activity_sink=silent_panel,
+    )
+    # The composite sink is what the runtime hands to Docker; drive it directly.
+    _emit_trace_event(written)
+
+    assert any("LLM TRACE" in line for line in written)
+
+
+def _emit_trace_event(written: list[str]) -> None:
+    from agentbench.cli.offline_runtime import _trace_output
+
+    silent_panel = LLMActivity(lambda _: None, live_updates=False)
+    TerminalTraceSink(_trace_output(silent_panel, written.append)).emit(
+        TraceEvent(
+            "llm_request",
+            {
+                "call_id": "call-1",
+                "route_id": "openai-chat",
+                "provider": "offline",
+                "method": "POST",
+                "host": "api.openai.com",
+                "path": "/v1/chat/completions",
+            },
+        )
+    )
 
 
 def test_offline_runtime_targets_the_offline_plugin_with_a_synthetic_credential(

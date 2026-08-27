@@ -82,8 +82,10 @@ def build_offline_runtime(
     if activity_sink is not None:
         sinks.append(activity_sink)
     if llm_trace == "terminal":
-        trace_output = getattr(activity_sink, "write_static", output_fn)
-        sinks.append(TerminalTraceSink(trace_output))
+        # Only route through the live panel when it actually owns the terminal.
+        # Otherwise its static path may be silenced, which would drop the trace
+        # the caller explicitly asked for.
+        sinks.append(TerminalTraceSink(_trace_output(activity_sink, output_fn)))
 
     # The offline target never contacts a provider, so its credential is synthetic.
     # Seeding it here keeps it out of the resolver's substituted-secret report,
@@ -121,6 +123,15 @@ def build_offline_runtime(
         secret_resolver=secret_resolver,
         call_recorder=call_recorder,
     )
+
+
+def _trace_output(
+    activity_sink: TraceSink | None, output_fn: Callable[[str], None]
+) -> Callable[[str], None]:
+    write_static = getattr(activity_sink, "write_static", None)
+    if callable(write_static) and getattr(activity_sink, "live", False):
+        return write_static
+    return output_fn
 
 
 class _CompositeTraceSink:

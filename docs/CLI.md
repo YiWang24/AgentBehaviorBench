@@ -221,8 +221,8 @@ python -m agentbench verify swe-agent --input "@prompts\probe.txt" --keep-artifa
 | `--inputs N` | No | `1` | Number of probe inputs sent in the single Case. |
 | `--keep-artifacts` | No | Delete | Keep the temporary result log and print its path. |
 | `--json` | No | Human report | Print one JSON summary and nothing else. |
-| `--llm-trace {off,terminal}` | No | `off` | Print the sanitized captured model requests and responses. |
-| `--llm-trace-max-bytes BYTES` | No | `262144` | Maximum displayed bytes per request or response. |
+| `--llm-trace {off,terminal}` | No | `off` | Also dump every captured payload in full. Debugging only. |
+| `--llm-trace-max-bytes BYTES` | No | `2048` | Maximum displayed bytes per request or response. |
 | `-h`, `--help` | No | - | Show `verify` help and exit. |
 
 Unlike `run` and `certify`, `verify` always runs exactly **one** Case regardless of
@@ -286,6 +286,13 @@ A failure leads with the reason rather than a generic message:
 
 Call lists longer than ten are elided in the middle. Stubbed secrets, when any were
 substituted, are listed above the verdict.
+
+The report is the whole output by default. `--llm-trace terminal` adds a full dump
+of every captured payload on top of it, which is a debugging firehose rather than a
+verbosity level: an Agent that resends a long system prompt each turn produces
+hundreds of extra lines. `verify` therefore caps each payload at 2048 bytes instead
+of the 256 KiB used elsewhere; raise `--llm-trace-max-bytes` when a truncated
+payload is exactly what needs inspecting.
 
 ### 4.7 Machine-Readable Output
 
