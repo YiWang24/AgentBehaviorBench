@@ -141,6 +141,10 @@ Evidence (repository @ reviewed revision):
   - Xeron2000/openOii @ 8fb0f70
   - liangdabiao/langgraph_multi-agent-rag-customer-support @ a30f964
   - hwchase17/langchain-streamlit-template @ 3c676a6
+  - jank/curiosity @ 41c9195
+  - didilili/deepsearch-agents @ d0f6eed
+  - kaymen99/personal-ai-assistant @ c96fefb
+  - GU-Cryptography/anykb @ aa7c02e
   Checked in each case: `licen[cs]e*` in the repository root, a licence
   statement in README.md, and `project.license` / licence classifiers in
   pyproject.toml.
@@ -163,7 +167,10 @@ Reason: Both are GPL. Vendoring a snapshot into this repository is
 Evidence:
   - tevslin/meeting-reporter @ 525f6bb, XD-MHLOO/Osintgraph @ c9bbcab; both
     ship a GNU General Public License.
-  - psyray/oasis @ 60388ad ships a GNU General Public License.
+  - psyray/oasis @ 60388ad and OS3Lab/agent4kdump @ db08e0a ship a GNU
+    General Public License.
+  - guangshu100/BidMaster-Pro @ 117ca62 ships a GNU Affero General
+    Public License.
   - KodyKendall/LlamaBot @ 884cd2a ships a GNU Affero General Public
     License. It also requires a Docker daemon (R2).
   - test-zeus-ai/testzeus-hercules @ fa2b469 ships a GNU Affero General Public
@@ -346,6 +353,7 @@ Evidence (repository @ reviewed revision):
   - jd-opensource/JoySafeter @ 12234a1
   - louisgthier/decompai @ 0c2398c
   - KodyKendall/LlamaBot @ 884cd2a (also AGPL-3.0, see Copyleft)
+  - ai-forever/giga_agent @ 83872f0
   Matched in each case on `docker.sock`, `--privileged`, `docker.from_env`,
   or `containers.run(` outside test and deployment directories.
 Reconsider when: the agent gains a mode that performs its work in-process, or
@@ -382,4 +390,35 @@ Evidence (repository @ reviewed revision):
   `build_graph` / `get_graph` / `make_graph` definitions outside `tests/`.
 Reconsider when: a revision is pinned in which the graph is defined in the
   repository and exposed as a stable `file.py:attribute`.
+```
+
+---
+
+## No agent of its own
+
+R4 requires a complete, independently installable project. An agent whose
+capabilities are supplied by a client at runtime cannot be exercised in the
+container: whatever it is given to do, the benchmark would have invented.
+
+```text
+Agent rejected: Yonom/assistant-ui-langgraph-fastapi
+Requirement: R4
+Reason code: INCOMPLETE_PROJECT
+Reason: The backend is a chat-UI template rather than an agent with its own
+  capability. Its tool set arrives from the browser through mandatory
+  `configurable` keys, and the sole backend tool is an acknowledged stub.
+Evidence:
+  - Reviewed revision: 269ae8b
+  - `backend/app/langgraph/agent.py` requires `config["configurable"]["system"]`
+    and `config["configurable"]["frontend_tools"]`; both are supplied by the
+    assistant-ui frontend, and `call_model` raises `KeyError` without them.
+  - `FrontendTool._run` raises `NodeInterrupt("This is a frontend tool call")`
+    by design — those tools execute in the browser, not the container.
+  - The only backend tool, `get_stock_price`, is commented "This is a mock
+    implementation" and returns the same hardcoded Apple record for every
+    argument (`return mock_stock_data["AAPL"]`), so it cannot distinguish one
+    request from another.
+Reconsider when: the repository grows an agent with backend capability of its
+  own, or AgentBench gains a reviewed way to supply a client-side tool set as
+  part of a Case.
 ```
