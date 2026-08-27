@@ -48,3 +48,38 @@ Reconsider when: a revision is pinned in which the research graph is defined in
   gains a reviewed adapter for agents that execute behind an HTTP gateway
   (`UNSUPPORTED_EXECUTION_MODE` would otherwise also apply).
 ```
+
+---
+
+## guy-hartstein/company-research-agent
+
+```text
+Agent rejected: company-research-agent
+Requirement: R1 (model interception boundary)
+Reason code: UNSUPPORTED_MODEL_PROTOCOL
+Reason: The pipeline requires two model providers. The four research analysts
+  use OpenAI, but the Briefing node constructs ChatGoogleGenerativeAI against
+  Google's native Generative Language API and raises without GEMINI_API_KEY —
+  there is no fallback. The Model Interceptor registers protocol plugins for
+  openai-chat, openai-responses, and anthropic-messages only, and the OpenRouter
+  target maps endpoints for those three. Gemini traffic can therefore be neither
+  decoded for Trace nor forwarded, so a manifest for this Agent could not
+  honestly declare its model traffic.
+Evidence:
+  - Reviewed revision: 52c904c8169f0a36ee8c1de46d5745aee731a0b4
+  - `backend/nodes/briefing.py:29` raises
+    `ValueError("GEMINI_API_KEY environment variable is not set")`.
+  - `backend/nodes/briefing.py:32` builds `ChatGoogleGenerativeAI(model="gemini-2.5-flash")`.
+  - `services/model-interceptor/pyproject.toml` registers exactly three protocol
+    plugins under `defuzex.model_interceptor.protocols`.
+  - `OpenRouterTarget._ENDPOINTS` has no Gemini entry and raises
+    `TargetRoutingError` for any unlisted protocol.
+  - The rest of the adaptation is sound: the graph builds, and a single
+    substitution of `AsyncTavilyClient` in
+    `backend/nodes/researchers/base.py` covers search, crawl, and extract across
+    all ten nodes. The work is preserved in the AgentFactory queue.
+Reconsider when: a reviewed `google-genai` protocol plugin and a matching target
+  endpoint mapping exist in the Model Interceptor. Rewriting the Briefing node
+  to call OpenAI is explicitly not an acceptable workaround — it would change
+  which model produces the briefings, which is the behaviour under test.
+```
