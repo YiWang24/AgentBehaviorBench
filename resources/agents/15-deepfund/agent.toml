@@ -1,0 +1,66 @@
+schema_version = "defuzex-bench.agent.v2"
+agent_id = "deepfund"
+display_name = "DeepFund Trading Workflow"
+framework = "langgraph"
+
+[source]
+url = "https://github.com/HKUSTDial/DeepFund"
+revision = "e31f1c2eae845b8627fe65621ba4febaf55c2385"
+license = "MIT"
+
+[build]
+context = "."
+dockerfile = "Dockerfile"
+
+[launch]
+argv = ["python", "-m", "deepfund_benchmark.worker"]
+input_mode = "jsonl"
+output_format = "jsonl"
+workdir = "/opt/agent"
+
+[runtime]
+type = "docker"
+timeout_sec = 300
+env_keys = []
+secret_env_keys = []
+
+[llm_interception]
+required = true
+trust_plugin = "pem-env"
+
+[llm_interception.environment]
+OPENAI_BASE_URL = "https://api.openai.com/v1"
+DEEPFUND_STATE_ROOT = "/tmp/deepfund"
+DB_PATH = "/tmp/deepfund/db/deepfund.sqlite"
+DEEPFUND_LOG_DIR = "/tmp/deepfund/logs"
+
+[[llm_interception.credentials]]
+id = "primary"
+agent_env = "OPENAI_API_KEY"
+auth_plugin = "bearer-token"
+
+[[llm_interception.routes]]
+id = "openai-chat"
+host_patterns = ["api.openai.com"]
+ports = [443]
+methods = ["POST"]
+path_patterns = ["/v1/chat/completions"]
+protocol_plugin = "openai-chat"
+credential = "primary"
+
+[[llm_interception.routes]]
+id = "openai-responses"
+host_patterns = ["api.openai.com"]
+ports = [443]
+methods = ["POST"]
+path_patterns = ["/v1/responses"]
+protocol_plugin = "openai-responses"
+credential = "primary"
+
+[adapter]
+type = "langgraph"
+mode = "in_process"
+config = "langgraph.json"
+graph_id = "deepfund"
+input_key = "ticker"
+output_key = "decisions"

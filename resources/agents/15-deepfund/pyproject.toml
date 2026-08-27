@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deepfund-benchmark"
+version = "0.1.0"
+description = "AgentBench adaptation of the HKUSTDial/DeepFund trading workflow."
+requires-python = ">=3.11"
+# The Streamlit viewer and the Supabase backend are not reached by the graph:
+# the benchmark runs the local SQLite mode. Provider SDKs other than OpenAI are
+# omitted because llm/provider.py imports them lazily per selected provider.
+dependencies = [
+    "langgraph>=0.2",
+    "langchain>=0.3",
+    "langchain-core>=0.3",
+    "langchain-openai>=0.2",
+    "langchain-anthropic>=0.3",
+    "langchain-deepseek>=0.1",
+    "langchain-ollama>=0.2",
+    "langchain-fireworks>=0.2",
+    "yfinance>=0.2.60",
+    # util/db_helper imports the Supabase backend at module load even in
+    # local SQLite mode; the client is never connected.
+    "supabase>=2.0",
+    "pandas>=2.2",
+    "pydantic>=2.7",
+    "python-dotenv>=1.0",
+    "pyyaml>=6.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["agents*", "apis*", "graph*", "llm*", "util*", "database*", "config*", "deepfund_benchmark*", "benchmark_mocks*"]
+
+[tool.setuptools.package-data]
+config = ["*.yaml", "provider/*.yaml"]

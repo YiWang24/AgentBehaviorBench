@@ -129,3 +129,12 @@ status = "adapting"
 framework = "langgraph"
 source = "https://github.com/mikekelly/AgentK"
 case = 1
+
+[[agents]]
+agent_id = "deepfund"
+path = "resources/agents/15-deepfund"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/HKUSTDial/DeepFund"
+case = 1

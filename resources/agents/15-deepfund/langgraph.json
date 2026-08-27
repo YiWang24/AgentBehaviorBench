@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "deepfund": "./src/deepfund_benchmark/graph.py:graph"
+  },
+  "env": ".env"
+}
