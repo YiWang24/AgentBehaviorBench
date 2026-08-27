@@ -289,6 +289,101 @@ def test_reply_identifiers_are_reproducible_for_an_identical_request() -> None:
     assert _reply(payload)["id"] == _reply(payload)["id"]
 
 
+def _sse(payload: dict[str, object], protocol_plugin: str = "openai-chat") -> list[dict]:
+    response = OFFLINE_MOCK_TARGET.build_response(
+        json.dumps({**payload, "stream": True}).encode("utf-8"),
+        route=_route(protocol_plugin),
+        target=_target(),
+    )
+    assert response.status == 200
+    assert response.headers["Content-Type"] == "text/event-stream"
+
+    frames = []
+    for line in response.content.decode("utf-8").splitlines():
+        if line.startswith("data:"):
+            value = line[5:].strip()
+            frames.append(value if value == "[DONE]" else json.loads(value))
+    return frames
+
+
+def test_streaming_chat_request_gets_an_event_stream() -> None:
+    """A non-streaming body for a streaming request yields no generations.
+
+    langchain-openai reads chat completions through its stream parser whenever
+    the request sets `stream`, and a plain JSON reply leaves that parser with
+    nothing, failing the run with "No generations found in stream".
+    """
+
+    frames = _sse({"messages": [{"role": "user", "content": "hi"}]})
+
+    assert frames[-1] == "[DONE]"
+    assert frames[0]["object"] == "chat.completion.chunk"
+    assert frames[0]["choices"][0]["delta"]["role"] == "assistant"
+    assert any(
+        frame != "[DONE]" and frame["choices"][0]["delta"].get("content") == OFFLINE_TEXT
+        for frame in frames
+    )
+    assert frames[-2]["choices"][0]["finish_reason"] == "stop"
+
+
+def test_streaming_chat_tool_call_is_delivered_as_a_delta() -> None:
+    frames = _sse(
+        {
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [
+                {"type": "function", "function": {"name": "search", "parameters": {}}}
+            ],
+        }
+    )
+
+    deltas = [
+        frame["choices"][0]["delta"]
+        for frame in frames
+        if frame != "[DONE]" and frame["choices"][0]["delta"].get("tool_calls")
+    ]
+
+    assert len(deltas) == 1
+    call = deltas[0]["tool_calls"][0]
+    assert call["index"] == 0
+    assert call["function"]["name"] == "search"
+    assert frames[-2]["choices"][0]["finish_reason"] == "tool_calls"
+
+
+def test_streaming_anthropic_request_gets_message_events() -> None:
+    frames = _sse(
+        {"messages": [{"role": "user", "content": "hi"}]},
+        protocol_plugin="anthropic-messages",
+    )
+    kinds = [frame["type"] for frame in frames]
+
+    assert kinds[0] == "message_start"
+    assert kinds[-1] == "message_stop"
+    assert "content_block_delta" in kinds
+    assert any(
+        frame.get("delta", {}).get("text") == OFFLINE_TEXT
+        for frame in frames
+        if frame["type"] == "content_block_delta"
+    )
+
+
+def test_streaming_responses_request_ends_with_the_complete_response() -> None:
+    frames = _sse(
+        {"input": [{"role": "user", "content": "hi"}]},
+        protocol_plugin="openai-responses",
+    )
+
+    assert frames[0]["type"] == "response.created"
+    assert frames[0]["response"]["output"] == []
+    assert frames[-1]["type"] == "response.completed"
+    assert frames[-1]["response"]["output"][0]["type"] == "message"
+
+
+def test_non_streaming_request_still_gets_json() -> None:
+    body = _reply({"messages": [{"role": "user", "content": "hi"}]})
+
+    assert body["object"] == "chat.completion"
+
+
 def test_offline_target_rejects_a_non_json_body() -> None:
     with pytest.raises(OfflineResponseError, match="valid UTF-8 JSON"):
         OFFLINE_MOCK_TARGET.build_response(

@@ -19,6 +19,7 @@ from .config import Route, Target
 OFFLINE_TARGET_PLUGIN = "offline-mock"
 OFFLINE_TEXT = "offline verification reply"
 _JSON_HEADERS = {"Content-Type": "application/json"}
+_SSE_HEADERS = {"Content-Type": "text/event-stream", "Cache-Control": "no-store"}
 _TOOL_CALL_PREFIX = "call_offline_verify"
 
 
@@ -86,10 +87,20 @@ class OfflineMockTarget:
         token = _fingerprint(content)
         if route.protocol_plugin == "anthropic-messages":
             body = _anthropic_messages(payload, model, token)
+            to_events = _anthropic_events
         elif route.protocol_plugin == "openai-responses":
             body = _openai_responses(payload, model, token)
+            to_events = _openai_responses_events
         else:
             body = _openai_chat(payload, model, token)
+            to_events = _openai_chat_events
+
+        if payload.get("stream"):
+            return OfflineResponse(
+                status=200,
+                headers=dict(_SSE_HEADERS),
+                content=_encode_sse(to_events(body)),
+            )
         return OfflineResponse(
             status=200,
             headers=dict(_JSON_HEADERS),
@@ -327,3 +338,201 @@ def _anthropic_messages(
         "stop_reason": stop_reason,
         "usage": {"input_tokens": 1, "output_tokens": 1},
     }
+
+
+def _encode_sse(events: list[tuple[str | None, Any]]) -> bytes:
+    """Render `(event_name, data)` pairs as one complete SSE body.
+
+    The reply is canned, so the whole stream is emitted at once. Clients parse
+    it incrementally either way, and the interceptor's `text/event-stream`
+    decoder reads the same `data:` lines it reads from a real provider.
+    """
+
+    lines: list[str] = []
+    for name, data in events:
+        if name is not None:
+            lines.append(f"event: {name}")
+        payload = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False)
+        lines.append(f"data: {payload}")
+        lines.append("")
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def _openai_chat_events(body: Mapping[str, Any]) -> list[tuple[str | None, Any]]:
+    """Chat-completions SSE frames equivalent to one non-streaming reply."""
+
+    choice = body["choices"][0]
+    message = choice["message"]
+    base = {
+        "id": body["id"],
+        "object": "chat.completion.chunk",
+        "created": body.get("created", 0),
+        "model": body.get("model"),
+    }
+
+    def chunk(delta: dict[str, Any], finish_reason: str | None) -> dict[str, Any]:
+        return {
+            **base,
+            "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
+        }
+
+    events: list[tuple[str | None, Any]] = [(None, chunk({"role": "assistant"}, None))]
+
+    tool_calls = message.get("tool_calls")
+    if tool_calls:
+        for index, call in enumerate(tool_calls):
+            function = call.get("function", {})
+            events.append(
+                (
+                    None,
+                    chunk(
+                        {
+                            "tool_calls": [
+                                {
+                                    "index": index,
+                                    "id": call.get("id"),
+                                    "type": "function",
+                                    "function": {
+                                        "name": function.get("name"),
+                                        "arguments": function.get("arguments", ""),
+                                    },
+                                }
+                            ]
+                        },
+                        None,
+                    ),
+                )
+            )
+    elif message.get("content"):
+        events.append((None, chunk({"content": message["content"]}, None)))
+
+    events.append((None, chunk({}, choice.get("finish_reason", "stop"))))
+    events.append((None, "[DONE]"))
+    return events
+
+
+def _anthropic_events(body: Mapping[str, Any]) -> list[tuple[str | None, Any]]:
+    """Anthropic messages SSE frames equivalent to one non-streaming reply."""
+
+    opening = {key: value for key, value in body.items() if key != "content"}
+    opening["content"] = []
+    events: list[tuple[str | None, Any]] = [
+        ("message_start", {"type": "message_start", "message": opening})
+    ]
+
+    for index, block in enumerate(body.get("content", [])):
+        if block.get("type") == "tool_use":
+            events.append(
+                (
+                    "content_block_start",
+                    {
+                        "type": "content_block_start",
+                        "index": index,
+                        "content_block": {
+                            "type": "tool_use",
+                            "id": block.get("id"),
+                            "name": block.get("name"),
+                            "input": {},
+                        },
+                    },
+                )
+            )
+            events.append(
+                (
+                    "content_block_delta",
+                    {
+                        "type": "content_block_delta",
+                        "index": index,
+                        "delta": {
+                            "type": "input_json_delta",
+                            "partial_json": json.dumps(
+                                block.get("input", {}), ensure_ascii=False
+                            ),
+                        },
+                    },
+                )
+            )
+        else:
+            events.append(
+                (
+                    "content_block_start",
+                    {
+                        "type": "content_block_start",
+                        "index": index,
+                        "content_block": {"type": "text", "text": ""},
+                    },
+                )
+            )
+            events.append(
+                (
+                    "content_block_delta",
+                    {
+                        "type": "content_block_delta",
+                        "index": index,
+                        "delta": {"type": "text_delta", "text": block.get("text", "")},
+                    },
+                )
+            )
+        events.append(
+            ("content_block_stop", {"type": "content_block_stop", "index": index})
+        )
+
+    events.append(
+        (
+            "message_delta",
+            {
+                "type": "message_delta",
+                "delta": {
+                    "stop_reason": body.get("stop_reason"),
+                    "stop_sequence": None,
+                },
+                "usage": body.get("usage", {}),
+            },
+        )
+    )
+    events.append(("message_stop", {"type": "message_stop"}))
+    return events
+
+
+def _openai_responses_events(body: Mapping[str, Any]) -> list[tuple[str | None, Any]]:
+    """Responses-API SSE frames equivalent to one non-streaming reply.
+
+    Clients that stream this protocol reconstruct the reply from the terminal
+    `response.completed` event, so the whole response object is carried there;
+    the per-item events before it mirror the shape a real provider sends.
+    """
+
+    creating = {key: value for key, value in body.items() if key != "output"}
+    creating["output"] = []
+    creating["status"] = "in_progress"
+
+    events: list[tuple[str | None, Any]] = [
+        ("response.created", {"type": "response.created", "response": creating})
+    ]
+
+    for index, item in enumerate(body.get("output", [])):
+        events.append(
+            (
+                "response.output_item.added",
+                {
+                    "type": "response.output_item.added",
+                    "output_index": index,
+                    "item": item,
+                },
+            )
+        )
+        events.append(
+            (
+                "response.output_item.done",
+                {
+                    "type": "response.output_item.done",
+                    "output_index": index,
+                    "item": item,
+                },
+            )
+        )
+
+    events.append(
+        ("response.completed", {"type": "response.completed", "response": dict(body)})
+    )
+    return events
