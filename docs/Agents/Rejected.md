@@ -136,6 +136,7 @@ Evidence (repository @ reviewed revision):
   - zamalali/DeepGit @ 940c14e
   - Lyra-stellAI/BYO-LLM-WIKI @ 0316fb7
   - nuglifeleoji/Options-Analytics-Agent @ 9de22c3
+  - icey1287/SuperMew @ f997821
   Checked in each case: `licen[cs]e*` in the repository root, a licence
   statement in README.md, and `project.license` / licence classifiers in
   pyproject.toml.
@@ -148,7 +149,7 @@ Reconsider when: upstream adds a permissive licence. Several of these are
 ## Copyleft
 
 ```text
-Agent rejected: tevslin/meeting-reporter, XD-MHLOO/Osintgraph
+Agent rejected: GPL/AGPL-licensed candidates
 Requirement: R8
 Reason code: SOURCE_OR_LICENSE_MISSING
 Reason: Both are GPL. Vendoring a snapshot into this repository is
@@ -158,6 +159,9 @@ Reason: Both are GPL. Vendoring a snapshot into this repository is
 Evidence:
   - tevslin/meeting-reporter @ 525f6bb, XD-MHLOO/Osintgraph @ c9bbcab; both
     ship a GNU General Public License.
+  - psyray/oasis @ 60388ad ships a GNU General Public License.
+  - test-zeus-ai/testzeus-hercules @ fa2b469 ships a GNU Affero General Public
+    License, whose network clause is stricter still. It also has no graph (R3).
   - meeting-reporter additionally has no module-level graph (R3).
 Reconsider when: a maintainer decides copyleft vendoring is acceptable, or the
   agents are run from an unvendored checkout rather than copied into
@@ -311,4 +315,52 @@ Reason code: SOURCE_OR_LICENSE_MISSING
 Reason: AGPL. Stronger copyleft than the GPL cases above and equally
   disqualifying for a vendored snapshot in an MIT repository. Policy call.
 Evidence: reviewed revision dd71150.
+```
+
+---
+
+## Privileged execution
+
+R2 requires the agent to run unprivileged in the benchmark container. An agent
+that needs a Docker daemon cannot: granting it means handing the agent control
+of the host's container runtime, which is a privilege escalation, and no
+adaptation removes the need without removing the agent's actual capability.
+
+```text
+Agent rejected: agents requiring a Docker daemon
+Requirement: R2
+Reason code: UNSUPPORTED_EXECUTION_MODE
+Reason: The agent builds or runs containers as part of its normal operation,
+  which requires a mounted Docker socket or a privileged container.
+Evidence (repository @ reviewed revision):
+  - xerrors/Yuxi @ edc0cc8
+  - beenuar/AiSOC @ 98e8dfc
+  - cuga-project/cuga-agent @ e661107
+  - zhongyu09/openchatbi @ c8786cb
+  Matched in each case on `docker.sock`, `--privileged`, `docker.from_env`,
+  or `containers.run(` outside test and deployment directories.
+Reconsider when: the agent gains a mode that performs its work in-process, or
+  AgentBench gains a reviewed nested-sandbox runtime.
+```
+
+---
+
+## No agent graph
+
+R3 requires a stable `file.py:attribute` entry point that resolves to a
+LangGraph graph or a zero-argument factory returning one.
+
+```text
+Agent rejected: no compiled graph or graph factory
+Requirement: R3
+Reason code: INVALID_ENTRYPOINT
+Reason: No `StateGraph` construction and no graph factory exists outside tests,
+  so there is nothing for the LangGraph adapter to load.
+Evidence (repository @ reviewed revision):
+  - ShenSeanChen/waku-agent @ 680f64a
+  - test-zeus-ai/testzeus-hercules @ fa2b469 (also AGPL-3.0, see Copyleft)
+  Checked: `grep -rn "StateGraph(" --include='*.py'` and a search for
+  `build_graph` / `get_graph` / `make_graph` definitions outside `tests/`.
+Reconsider when: a revision is pinned in which the graph is defined in the
+  repository and exposed as a stable `file.py:attribute`.
 ```
