@@ -225,3 +225,57 @@ Reconsider when: upstream type-guards the join in `synthesize_response`, or
   stops writing a non-string into `sub_results`. Patching it here would mean
   fixing the agent's own logic rather than adapting a benchmark boundary.
 ```
+
+---
+
+## Privileged execution
+
+```text
+Agent rejected: Negai-ai/AgentClaw, PurpleAILAB/Decepticon, EuniAI/Prometheus
+Requirement: R2
+Reason code: UNSUPPORTED_EXECUTION_MODE
+Reason: Each drives Docker from inside the agent — a mounted socket, a
+  privileged container, or `docker.from_env()` — to spin up the sandbox it
+  works in. The benchmark runtime gives an agent no Docker socket, no
+  privileged mode, and a read-only root, and relaxing that would remove the
+  isolation the benchmark depends on.
+Evidence:
+  - Reviewed revisions: AgentClaw 034efd1, Decepticon 31e1c8e,
+    Prometheus acb8360.
+  - Each matches `docker\.sock|--privileged|docker\.from_env` in non-test
+    Python source.
+  - Prometheus is additionally GPL, which is disqualifying for a vendored
+    snapshot on its own.
+Reconsider when: AgentBench gains a reviewed nested-sandbox runtime, or the
+  agents accept an externally supplied workspace instead of creating their own
+  container.
+```
+
+---
+
+## Further licence rejections
+
+```text
+Agent rejected: datawhalechina/vibe-blog
+Requirement: R8
+Reason code: SOURCE_OR_LICENSE_MISSING
+Reason: Creative Commons non-commercial licence; see the licence gate above.
+Evidence: reviewed revision 7fc7970.
+```
+
+```text
+Agent rejected: wshobson/financial-chat, Westlake-AGI-Lab/AppAgentX
+Requirement: R8
+Reason code: SOURCE_OR_LICENSE_MISSING
+Reason: No licence file, no README declaration, and no package metadata.
+Evidence: reviewed revisions financial-chat 55a1229, AppAgentX d0fcaeb.
+```
+
+```text
+Agent rejected: olaxbt/ai-market-maker
+Requirement: R8
+Reason code: SOURCE_OR_LICENSE_MISSING
+Reason: AGPL. Stronger copyleft than the GPL cases above and equally
+  disqualifying for a vendored snapshot in an MIT repository. Policy call.
+Evidence: reviewed revision dd71150.
+```
