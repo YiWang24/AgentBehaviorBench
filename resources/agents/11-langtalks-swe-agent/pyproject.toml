@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "langtalks-swe-benchmark"
+version = "0.1.0"
+description = "AgentBench adaptation of the langtalks/swe-agent architect and developer pipeline."
+requires-python = ">=3.12"
+# langgraph-cli is the upstream dev server and is not reached by the graph.
+# Every other upstream dependency is kept.
+dependencies = [
+    "langgraph>=1.0,<2",
+    "langchain-anthropic>=1.4",
+    "langsmith>=0.2.11",
+    "gitingest>=0.1.2",
+    "tree-sitter-languages>=1.10.2",
+    "tree-sitter==0.21.3",
+    "diff-match-patch>=20241021",
+    "thefuzz>=0.22.1",
+    "fuzzysearch>=0.7.3",
+    "pydantic>=2.7",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["agent*", "helpers*", "langtalks_swe_benchmark*", "benchmark_mocks*"]
+
+# The fixture project must land in the installed wheel, not just the source
+# tree: the agent works on a copy of it and a missing file only shows up as a
+# FileNotFoundError inside the container.
+[tool.setuptools.package-data]
+# The agent loads every prompt from a .md file next to its module. Upstream
+# resolves them as helpers/../agent/..., which lands inside site-packages
+# once installed -- so the files must ship in the wheel.
+agent = [
+    "architect/prompts/check_research_already_explored.md",
+    "architect/prompts/conduct_research_plan_prompt.md",
+    "architect/prompts/extract_implementation_plan.md",
+    "architect/prompts/plan_next_step_prompt.md",
+    "developer/prompts/create_diff_prompt.md",
+    "developer/prompts/developing_prompt.md",
+    "developer/prompts/get_clear_implementation_plan.md",
+    "developer/prompts/implement_diff.md",
+    "developer/prompts/implement_new_file.md",
+    "prompts/act_step_prompt.md",
+    "prompts/think_step_prompt.md",
+]
+"benchmark_mocks.fixtures" = [
+    "example_project/README.md",
+    "example_project/pyproject.toml",
+    "example_project/src/inventory/__init__.py",
+    "example_project/src/inventory/ledger.py",
+    "example_project/tests/test_ledger.py",
+]

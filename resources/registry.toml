@@ -93,3 +93,12 @@ status = "adapting"
 framework = "langgraph"
 source = "https://github.com/langchain-ai/react-agent"
 case = 1
+
+[[agents]]
+agent_id = "langtalks-swe-agent"
+path = "resources/agents/11-langtalks-swe-agent"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/langtalks/swe-agent"
+case = 1
