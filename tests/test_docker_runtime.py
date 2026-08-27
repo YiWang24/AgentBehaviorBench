@@ -123,3 +123,29 @@ def test_docker_transport_serializes_frozen_sdk_payloads() -> None:
     encoded = json.dumps(payload, default=_json_compatible)
 
     assert json.loads(encoded) == {"email_input": {"subject": "Hello"}}
+
+
+class TestInterceptionTokenShape:
+    """Agents guard on key format; a bare token fails before the first call."""
+
+    def test_openai_token_carries_the_common_prefix(self):
+        from agentbench.credential_shape import shaped
+
+        token = shaped("OPENAI_API_KEY", "abc123")
+        assert token.startswith("sk-")
+        assert token.endswith("abc123")
+
+    def test_anthropic_token_carries_the_anthropic_prefix(self):
+        from agentbench.credential_shape import shaped
+
+        token = shaped("ANTHROPIC_API_KEY", "abc123")
+        assert token.startswith("sk-ant-api03-")
+        # sk-ant- values also satisfy a looser sk- guard.
+        assert token.startswith("sk-")
+
+    def test_the_random_body_is_preserved_intact(self):
+        from agentbench.credential_shape import prefix_for, shaped
+
+        body = "a-very-random-body"
+        for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "TAVILY_API_KEY"):
+            assert shaped(name, body) == prefix_for(name) + body

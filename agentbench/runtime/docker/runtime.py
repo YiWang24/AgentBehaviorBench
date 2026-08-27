@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
+from agentbench.credential_shape import shaped
+
 from agentbench.adapter import AgentDescriptor
 from agentbench.runtime.agentcontainer import AgentContainerConfig
 from agentbench.runtime.contracts import (
@@ -250,7 +252,10 @@ class DockerRuntime:
         target_secret_file.write_text(upstream_secret, encoding="utf-8")
 
         for credential in interception.credentials:
-            token = secrets.token_urlsafe(32)
+            # Shaped like the credential it stands in for: an Agent that guards
+            # on key format would otherwise reject the token before making a
+            # single call. The random body is unchanged.
+            token = shaped(credential.agent_env, secrets.token_urlsafe(32))
             token_file = secret_dir / f"{credential.credential_id}.token"
             token_file.write_text(token, encoding="utf-8")
             token_environment[credential.agent_env] = token

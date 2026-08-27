@@ -1,0 +1,12 @@
+Upstream licence declaration
+============================
+
+https://github.com/leonzzz435/garmin-ai-coach at revision 54a6494 declares the
+MIT Licence in its README — a badge linking to LICENSE and a "License" section
+reading "MIT License — see [LICENSE](LICENSE) for details" — but ships no
+LICENSE file, and its pyproject.toml carries no licence field. The link is dead
+in the upstream tree.
+
+The declaration is recorded here rather than a licence text being invented on
+upstream's behalf. If upstream adds a LICENSE file, vendor it and delete this
+note.

@@ -5,27 +5,15 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 
+from agentbench.credential_shape import shaped
+
 
 PLACEHOLDER_PREFIX = "defuzex-offline-verify"
-
-# Agents routinely validate the *shape* of a credential before using it —
-# `key.startswith("sk-")` is a common guard, and Anthropic clients often check
-# `sk-ant-`. A placeholder that fails those guards makes startup verification
-# report a configuration error the deployment does not have. Placeholders
-# therefore carry the prefix of the credential family they stand in for; the
-# body still says plainly what they are.
-_KEY_PREFIXES = (
-    ("ANTHROPIC", "sk-ant-api03-"),
-    ("", "sk-"),
-)
-
 
 def placeholder_for(name: str) -> str:
     """A stand-in for `name`, shaped like the credential it replaces."""
 
-    upper = name.upper()
-    prefix = next(value for marker, value in _KEY_PREFIXES if marker in upper)
-    return f"{prefix}{PLACEHOLDER_PREFIX}-{name.lower()}"
+    return shaped(name, f"{PLACEHOLDER_PREFIX}-{name.lower()}")
 
 
 class OfflineSecretResolver:

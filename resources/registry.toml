@@ -237,3 +237,12 @@ status = "adapting"
 framework = "langgraph"
 source = "https://github.com/duartecaldascardoso/article-explainer"
 case = 1
+
+[[agents]]
+agent_id = "garmin-coach"
+path = "resources/agents/27-garmin-coach"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/leonzzz435/garmin-ai-coach"
+case = 1
