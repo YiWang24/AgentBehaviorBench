@@ -194,3 +194,34 @@ Evidence:
 Reconsider when: upstream exposes the compiled graph, or a maintainer accepts a
   benchmark-side factory that reaches into the private builder.
 ```
+
+---
+
+## Broken upstream
+
+```text
+Agent rejected: bcefghj/smart-cs-multi-agent
+Requirement: R10
+Reason code: VALIDATION_FAILED
+Reason: The graph cannot complete a request as shipped. `ComplianceChecker`
+  always writes a dict into `sub_results`, and the supervisor's `synthesize`
+  node joins every value in that mapping without a type guard, so any run that
+  actually produces an answer ends in
+  `TypeError: sequence item 1: expected str instance, dict found`.
+  This is unconditional and has nothing to do with model output: the offending
+  value is built from the compliance verdict, not from a reply.
+Evidence:
+  - Reviewed revision: e045f0256d42db3c800662f60bd957d9c78374a4
+  - `agents/compliance_checker.py:209` always adds
+    `sub_results["compliance"] = {"passed": ..., "risk_level": ..., "violations": ...}`.
+  - `agents/supervisor.py:113-117` builds the final reply with
+    `"\n\n".join(result_parts)` over `sub_results.values()` with no isinstance
+    check — while `compliance_checker.py:192` guards the same mapping with
+    `isinstance(result, str)`, so the mismatch is visible within the repository.
+  - The adaptation itself worked: the graph builds, all five nodes run, and a
+    probe reached `synthesize` after five model calls with retrieval served from
+    a local corpus. Only the upstream defect stops it.
+Reconsider when: upstream type-guards the join in `synthesize_response`, or
+  stops writing a non-string into `sub_results`. Patching it here would mean
+  fixing the agent's own logic rather than adapting a benchmark boundary.
+```
