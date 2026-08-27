@@ -231,7 +231,8 @@ Reconsider when: upstream type-guards the join in `synthesize_response`, or
 ## Privileged execution
 
 ```text
-Agent rejected: Negai-ai/AgentClaw, PurpleAILAB/Decepticon, EuniAI/Prometheus
+Agent rejected: Negai-ai/AgentClaw, PurpleAILAB/Decepticon, EuniAI/Prometheus,
+  lingxi-agent/Lingxi
 Requirement: R2
 Reason code: UNSUPPORTED_EXECUTION_MODE
 Reason: Each drives Docker from inside the agent — a mounted socket, a
@@ -241,9 +242,14 @@ Reason: Each drives Docker from inside the agent — a mounted socket, a
   isolation the benchmark depends on.
 Evidence:
   - Reviewed revisions: AgentClaw 034efd1, Decepticon 31e1c8e,
-    Prometheus acb8360.
-  - Each matches `docker\.sock|--privileged|docker\.from_env` in non-test
-    Python source.
+    Prometheus acb8360, Lingxi 1f2e5dc.
+  - The first three match `docker\.sock|--privileged|docker\.from_env` in
+    non-test Python source.
+  - Lingxi declares `docker` as a dependency and builds its workspace through
+    `swerex.deployment.docker.DockerDeployment`, pulling a per-instance
+    SWE-bench image (`src/agent/swerex_utils.py:70`) and running commands with
+    `docker_container.exec_run` (`tool_set/sepl_tools.py:368`). It also needs
+    embeddings and Chroma, neither of which is the blocker here.
   - Prometheus is additionally GPL, which is disqualifying for a vendored
     snapshot on its own.
 Reconsider when: AgentBench gains a reviewed nested-sandbox runtime, or the
