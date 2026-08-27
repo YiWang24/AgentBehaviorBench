@@ -308,7 +308,6 @@ and the document are the whole contract:
   "command": "verify",
   "agent_id": "langgraph-customer-support-agent",
   "verdict": "pass",
-  "exit_code": 0,
   "cases": {"completed": 1, "requested": 1},
   "model_calls": {
     "captured_pairs": 2,
@@ -330,7 +329,9 @@ and the document are the whole contract:
 ```
 
 `verdict` is `pass`, `fail`, or `error`; `error` covers the preflight rejections in
-section 4.4. `result_log` is populated only with `--keep-artifacts`.
+section 4.4. It maps onto the exit codes in section 8 — `pass` is `0`, `fail` is `1`,
+`error` is `2` — so the document does not repeat the status the process already
+returns. `result_log` is populated only with `--keep-artifacts`.
 
 ## 5. `certify`
 

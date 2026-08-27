@@ -129,7 +129,6 @@ def test_passing_report_states_cases_and_captured_pairs() -> None:
     report = VerifyReport(
         agent_id="demo",
         verdict=PASS,
-        exit_code=0,
         completed_cases=1,
         requested_cases=1,
         captured_pairs=2,
@@ -148,7 +147,6 @@ def test_a_single_captured_pair_is_not_pluralized() -> None:
     report = VerifyReport(
         agent_id="demo",
         verdict=PASS,
-        exit_code=0,
         completed_cases=1,
         requested_cases=1,
         captured_pairs=1,
@@ -165,7 +163,6 @@ def test_failing_report_leads_with_the_reason() -> None:
     report = VerifyReport(
         agent_id="demo",
         verdict=FAIL,
-        exit_code=1,
         reason="AgentStartError: container exited",
     )
 
@@ -181,7 +178,6 @@ def test_long_call_lists_are_elided_in_the_middle() -> None:
     report = VerifyReport(
         agent_id="demo",
         verdict=PASS,
-        exit_code=0,
         completed_cases=1,
         requested_cases=1,
         captured_pairs=len(calls),
@@ -200,7 +196,6 @@ def test_stubbed_secrets_are_surfaced() -> None:
     report = VerifyReport(
         agent_id="demo",
         verdict=PASS,
-        exit_code=0,
         completed_cases=1,
         requested_cases=1,
         captured_pairs=1,
@@ -216,7 +211,6 @@ def test_kept_result_log_is_printed_and_omitted_otherwise() -> None:
     base = {
         "agent_id": "demo",
         "verdict": PASS,
-        "exit_code": 0,
         "completed_cases": 1,
         "requested_cases": 1,
         "captured_pairs": 1,
@@ -240,7 +234,6 @@ def test_json_summary_carries_the_verdict_and_every_call() -> None:
     report = VerifyReport(
         agent_id="demo",
         verdict=PASS,
-        exit_code=0,
         completed_cases=1,
         requested_cases=2,
         captured_pairs=1,
@@ -261,14 +254,27 @@ def test_json_summary_carries_the_verdict_and_every_call() -> None:
 def test_json_summary_of_a_preflight_error_has_no_counts() -> None:
     payload = json.loads(
         VerifyReport(
-            agent_id="demo", verdict=ERROR, exit_code=2, reason="not registered"
+            agent_id="demo", verdict=ERROR, reason="not registered"
         ).to_json()
     )
 
     assert payload["verdict"] == ERROR
-    assert payload["exit_code"] == 2
     assert payload["reason"] == "not registered"
     assert payload["model_calls"]["calls"] == []
+
+
+def test_the_shell_status_is_derived_from_the_verdict_and_left_out_of_the_json() -> None:
+    """The process already returns the status, and `verdict` says the same thing."""
+
+    codes = {
+        verdict: VerifyReport(agent_id="demo", verdict=verdict).exit_code
+        for verdict in (PASS, FAIL, ERROR)
+    }
+
+    assert codes == {PASS: 0, FAIL: 1, ERROR: 2}
+    assert "exit_code" not in json.loads(
+        VerifyReport(agent_id="demo", verdict=PASS).to_json()
+    )
 
 
 # --- stage lines -------------------------------------------------------------

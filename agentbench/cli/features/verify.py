@@ -255,7 +255,6 @@ def _build_report(
             reason = f"{item.error_type}: {item.error_message}"
         return VerifyReport(
             verdict=FAIL,
-            exit_code=execution.exit_code or 1,
             reason=reason,
             **common,  # type: ignore[arg-type]
         )
@@ -263,12 +262,11 @@ def _build_report(
     if offline.captured_pair_count < 1:
         return VerifyReport(
             verdict=FAIL,
-            exit_code=1,
             reason="Agent ran but no model call was captured, so its LLM traffic is not observable",
             **common,  # type: ignore[arg-type]
         )
 
-    return VerifyReport(verdict=PASS, exit_code=0, **common)  # type: ignore[arg-type]
+    return VerifyReport(verdict=PASS, **common)  # type: ignore[arg-type]
 
 
 def _fail_early(
@@ -278,9 +276,7 @@ def _fail_early(
     *,
     as_json: bool,
 ) -> int:
-    report = VerifyReport(
-        agent_id=agent_id, verdict=ERROR, exit_code=2, reason=reason
-    )
+    report = VerifyReport(agent_id=agent_id, verdict=ERROR, reason=reason)
     if as_json:
         output_fn(report.to_json())
     else:

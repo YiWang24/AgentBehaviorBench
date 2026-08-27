@@ -25,6 +25,8 @@ PASS = "pass"
 FAIL = "fail"
 ERROR = "error"
 
+EXIT_CODES = {PASS: 0, FAIL: 1, ERROR: 2}
+
 MARK_OK = "✓"
 MARK_FAIL = "✗"
 ARROW_IN = "▸"
@@ -56,7 +58,6 @@ class VerifyReport:
 
     agent_id: str
     verdict: str
-    exit_code: int
     completed_cases: int = 0
     requested_cases: int = 0
     captured_pairs: int = 0
@@ -69,13 +70,23 @@ class VerifyReport:
     def passed(self) -> bool:
         return self.verdict == PASS
 
+    @property
+    def exit_code(self) -> int:
+        """The shell status this verdict maps to.
+
+        Derived rather than stored so the two can never disagree, and left out of
+        the JSON: the process already returns it, and ``verdict`` says the same
+        thing in a form that does not need a lookup table.
+        """
+
+        return EXIT_CODES[self.verdict]
+
     def to_json(self) -> str:
         return json.dumps(
             {
                 "command": "verify",
                 "agent_id": self.agent_id,
                 "verdict": self.verdict,
-                "exit_code": self.exit_code,
                 "cases": {
                     "completed": self.completed_cases,
                     "requested": self.requested_cases,
