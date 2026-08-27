@@ -84,3 +84,12 @@ status = "adapting"
 framework = "langgraph"
 source = "https://github.com/JoshuaC215/agent-service-toolkit"
 case = 1
+
+[[agents]]
+agent_id = "react-agent"
+path = "resources/agents/10-react-agent"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/langchain-ai/react-agent"
+case = 1
