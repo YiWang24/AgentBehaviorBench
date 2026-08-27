@@ -66,3 +66,12 @@ status = "adapting"
 framework = "langgraph"
 source = "https://github.com/assafelovic/gpt-researcher"
 case = 1
+
+[[agents]]
+agent_id = "deepagents-research"
+path = "resources/agents/08-deepagents-research"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/langchain-ai/deepagents"
+case = 1
