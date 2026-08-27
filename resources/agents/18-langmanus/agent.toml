@@ -1,0 +1,82 @@
+schema_version = "defuzex-bench.agent.v2"
+agent_id = "langmanus"
+display_name = "LangManus Research Team"
+framework = "langgraph"
+
+[source]
+url = "https://github.com/darwin-lau/langmanus"
+revision = "a69eabf"
+license = "MIT"
+
+[build]
+context = "."
+dockerfile = "Dockerfile"
+
+[launch]
+argv = ["python", "-m", "langmanus_benchmark.worker"]
+input_mode = "jsonl"
+output_format = "jsonl"
+workdir = "/opt/agent"
+
+[runtime]
+type = "docker"
+timeout_sec = 300
+env_keys = []
+secret_env_keys = []
+
+[llm_interception]
+required = true
+trust_plugin = "pem-env"
+
+[llm_interception.environment]
+BASIC_MODEL = "gpt-4o"
+BASIC_BASE_URL = "https://api.openai.com/v1"
+VL_MODEL = "gpt-4o"
+VL_BASE_URL = "https://api.openai.com/v1"
+# The reasoning role is a langchain-deepseek client. It speaks the OpenAI chat
+# wire protocol, so it is captured on its own route with the openai-chat
+# plugin rather than being quietly swapped for an OpenAI client.
+REASONING_MODEL = "deepseek-chat"
+REASONING_BASE_URL = "https://api.deepseek.com/v1"
+LANGMANUS_WORKSPACE = "/tmp/langmanus"
+
+[[llm_interception.credentials]]
+id = "primary"
+agent_env = "BASIC_API_KEY"
+auth_plugin = "bearer-token"
+
+[[llm_interception.credentials]]
+id = "vision"
+agent_env = "VL_API_KEY"
+auth_plugin = "bearer-token"
+
+[[llm_interception.credentials]]
+id = "reasoning"
+agent_env = "REASONING_API_KEY"
+auth_plugin = "bearer-token"
+
+[[llm_interception.routes]]
+id = "openai-chat"
+host_patterns = ["api.openai.com"]
+ports = [443]
+methods = ["POST"]
+path_patterns = ["/v1/chat/completions"]
+protocol_plugin = "openai-chat"
+credential = "primary"
+
+[[llm_interception.routes]]
+id = "deepseek-chat"
+host_patterns = ["api.deepseek.com"]
+ports = [443]
+methods = ["POST"]
+path_patterns = ["/v1/chat/completions"]
+protocol_plugin = "openai-chat"
+credential = "reasoning"
+
+[adapter]
+type = "langgraph"
+mode = "in_process"
+config = "langgraph.json"
+graph_id = "langmanus"
+input_key = "messages"
+output_key = "messages"

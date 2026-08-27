@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "langmanus-benchmark"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "langgraph>=0.3.5,<1",
+    "langchain>=0.3,<1",
+    "langchain-core>=0.3,<1",
+    "langchain-community>=0.3.19,<1",
+    "langchain-experimental>=0.3.4,<1",
+    "langchain-openai>=0.3.8,<1",
+    # The reasoning role is a DeepSeek client. It speaks the OpenAI chat wire
+    # protocol, so the Model Interceptor captures it with the openai-chat
+    # plugin on a separate route.
+    "langchain-deepseek>=0.1.2,<1",
+    "python-dotenv>=1.0.1",
+    "httpx>=0.28.1",
+    "markdownify>=1.1.0",
+    "pandas>=2.2.3",
+    "numpy>=2.2.3",
+    # browser-use, fastapi/uvicorn/sse-starlette and yfinance are upstream
+    # dependencies of the web service and the real browser tool. The benchmark
+    # runs the graph directly and substitutes the browser, so none is needed.
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# The prompt templates are read by path relative to the installed module, so
+# they must ship in the wheel.
+[tool.setuptools.package-data]
+"src.prompts" = ["*.md"]
