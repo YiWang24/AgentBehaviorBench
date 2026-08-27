@@ -137,6 +137,10 @@ Evidence (repository @ reviewed revision):
   - Lyra-stellAI/BYO-LLM-WIKI @ 0316fb7
   - nuglifeleoji/Options-Analytics-Agent @ 9de22c3
   - icey1287/SuperMew @ f997821
+  - NanGePlus/LangGraphChatBot @ 30621c9
+  - Xeron2000/openOii @ 8fb0f70
+  - liangdabiao/langgraph_multi-agent-rag-customer-support @ a30f964
+  - hwchase17/langchain-streamlit-template @ 3c676a6
   Checked in each case: `licen[cs]e*` in the repository root, a licence
   statement in README.md, and `project.license` / licence classifiers in
   pyproject.toml.
@@ -160,6 +164,8 @@ Evidence:
   - tevslin/meeting-reporter @ 525f6bb, XD-MHLOO/Osintgraph @ c9bbcab; both
     ship a GNU General Public License.
   - psyray/oasis @ 60388ad ships a GNU General Public License.
+  - KodyKendall/LlamaBot @ 884cd2a ships a GNU Affero General Public
+    License. It also requires a Docker daemon (R2).
   - test-zeus-ai/testzeus-hercules @ fa2b469 ships a GNU Affero General Public
     License, whose network clause is stricter still. It also has no graph (R3).
   - meeting-reporter additionally has no module-level graph (R3).
@@ -337,6 +343,9 @@ Evidence (repository @ reviewed revision):
   - beenuar/AiSOC @ 98e8dfc
   - cuga-project/cuga-agent @ e661107
   - zhongyu09/openchatbi @ c8786cb
+  - jd-opensource/JoySafeter @ 12234a1
+  - louisgthier/decompai @ 0c2398c
+  - KodyKendall/LlamaBot @ 884cd2a (also AGPL-3.0, see Copyleft)
   Matched in each case on `docker.sock`, `--privileged`, `docker.from_env`,
   or `containers.run(` outside test and deployment directories.
 Reconsider when: the agent gains a mode that performs its work in-process, or
@@ -359,6 +368,11 @@ Reason: No `StateGraph` construction and no graph factory exists outside tests,
 Evidence (repository @ reviewed revision):
   - ShenSeanChen/waku-agent @ 680f64a
   - test-zeus-ai/testzeus-hercules @ fa2b469 (also AGPL-3.0, see Copyleft)
+  - togethercomputer/open_deep_research @ 66e43b4 — the agent is a custom
+    loop in `src/together_open_deep_research.py`, not a LangGraph graph.
+    `langgraph` appears only inside `src/libs/utils/agent_factory.py`, which
+    optionally constructs a *different* project's researcher as a benchmark
+    baseline. No `StateGraph` is constructed anywhere in the repository.
   - stophobia/deerflow2.0-enhanced @ 814bde3 — a deer-flow derivative carrying
     the same restructure: `backend/pyproject.toml` declares `langgraph-sdk`
     but not `langgraph`, and `grep -rn "StateGraph("` matches nothing in the
