@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "crypto_hedge": "./src/crypto_benchmark/graph.py:graph"
+  },
+  "env": ".env"
+}

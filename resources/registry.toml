@@ -309,3 +309,12 @@ status = "adapting"
 framework = "langgraph"
 source = "https://github.com/yycyyv/M-Cube"
 case = 1
+
+[[agents]]
+agent_id = "crypto-hedge-fund"
+path = "resources/agents/35-crypto-hedge-fund"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/51bitquant/ai-hedge-fund-crypto"
+case = 1
