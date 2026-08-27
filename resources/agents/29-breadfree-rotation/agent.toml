@@ -1,0 +1,59 @@
+schema_version = "defuzex-bench.agent.v2"
+agent_id = "breadfree-rotation"
+display_name = "BreadFree ETF Rotation"
+framework = "langgraph"
+
+[source]
+url = "https://github.com/FeiCoder/BreadFree-Simu"
+revision = "6e5d9dd"
+license = "MIT"
+
+[build]
+context = "."
+dockerfile = "Dockerfile"
+
+[launch]
+argv = ["python", "-m", "breadfree_benchmark.worker"]
+input_mode = "jsonl"
+output_format = "jsonl"
+workdir = "/opt/agent"
+
+[runtime]
+type = "docker"
+timeout_sec = 240
+env_keys = []
+secret_env_keys = []
+
+[llm_interception]
+required = true
+trust_plugin = "pem-env"
+
+[llm_interception.environment]
+BREADFREE_LOG_DIR = "/tmp/breadfree"
+BREADFREE_LOT_SIZE = "100"
+
+[[llm_interception.credentials]]
+id = "primary"
+agent_env = "HUNYUAN_API_KEY"
+auth_plugin = "bearer-token"
+
+# utils/llm_client.py hardcodes Tencent's OpenAI-compatible endpoint. It speaks
+# the OpenAI chat wire protocol, so the openai-chat plugin captures it; the
+# host pattern matches the URL in the vendored source rather than the source
+# being edited to point elsewhere.
+[[llm_interception.routes]]
+id = "tencent-lkeap-chat"
+host_patterns = ["api.lkeap.cloud.tencent.com"]
+ports = [443]
+methods = ["POST"]
+path_patterns = ["/v1/chat/completions"]
+protocol_plugin = "openai-chat"
+credential = "primary"
+
+[adapter]
+type = "langgraph"
+mode = "in_process"
+config = "langgraph.json"
+graph_id = "rotation"
+input_key = "history_snapshot"
+output_key = "target_weights"

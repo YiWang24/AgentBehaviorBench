@@ -255,3 +255,12 @@ status = "adapting"
 framework = "langgraph"
 source = "https://github.com/cnunescoelho/kiroku"
 case = 1
+
+[[agents]]
+agent_id = "breadfree-rotation"
+path = "resources/agents/29-breadfree-rotation"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/FeiCoder/BreadFree-Simu"
+case = 1
