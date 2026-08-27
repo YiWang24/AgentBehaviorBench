@@ -246,3 +246,12 @@ status = "adapting"
 framework = "langgraph"
 source = "https://github.com/leonzzz435/garmin-ai-coach"
 case = 1
+
+[[agents]]
+agent_id = "kiroku"
+path = "resources/agents/28-kiroku"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/cnunescoelho/kiroku"
+case = 1

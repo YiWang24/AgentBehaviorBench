@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kiroku-benchmark"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    # Pinned to the exact versions upstream's requirements.txt declares. The
+    # node methods annotate `config: dict` rather than `RunnableConfig`, and
+    # newer LangGraph reads that annotation and stops injecting config, so the
+    # manual-review nodes fail with "run() missing 1 required positional
+    # argument: 'config'". Pinning is preferred over retyping vendored code.
+    "langgraph==0.2.48",
+    "langchain-core==0.3.18",
+    "langchain-community==0.3.7",
+    "langchain-experimental==0.3.3",
+    "langchain-openai==0.2.8",
+    "nltk>=3.8",
+    "numpy<2",
+    "pydantic>=2.9",
+    "pyyaml>=6.0",
+    "markdown>=3.4",
+    "xmltodict>=0.13",
+    "chromalog>=1.0",
+    "fire>=0.6",
+    # kiroku_app imports IPython.display at module scope for notebook use. It
+    # is small, so it is installed rather than stubbed.
+    "ipython>=8.29",
+    # Not installed: gradio (the web UI is not the entry point; a refusing stub
+    # stands in for the module-scope import), tavily-python and the arXiv /
+    # PubMed / Wikipedia clients (the search layer is replaced).
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = ["kiroku_app"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
