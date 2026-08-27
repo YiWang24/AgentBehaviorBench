@@ -219,3 +219,12 @@ status = "adapting"
 framework = "langgraph"
 source = "https://github.com/Gen-Future/ExcelMind"
 case = 1
+
+[[agents]]
+agent_id = "nl2sql-agent"
+path = "resources/agents/25-nl2sql-agent"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/eosho/langchain_data_agent"
+case = 1

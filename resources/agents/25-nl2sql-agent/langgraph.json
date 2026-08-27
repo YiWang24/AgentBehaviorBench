@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "nl2sql": "./src/nl2sql_benchmark/graph.py:graph"
+  },
+  "env": ".env"
+}
