@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "adaptive_rag": "./src/src/rag/graph_builder.py:builder"
+  },
+  "env": ".env"
+}

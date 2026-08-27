@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adaptive-rag-benchmark"
+version = "0.1.0"
+description = "AgentBench adaptation of the dhruvsinghal09/Adaptive-Rag graph."
+requires-python = ">=3.11"
+dependencies = [
+    # Pinned to the langchain 0.3 line the project targets: reAct_agent.py
+    # imports create_react_agent and AgentExecutor from langchain.agents, both
+    # of which moved in 1.x. Pinning beats editing the vendored import.
+    "langgraph>=0.2,<1",
+    "langchain>=0.3,<1",
+    "langchain-core>=0.3,<1",
+    "langchain-openai>=0.2,<1",
+    "langchain-community>=0.3,<1",
+    "faiss-cpu>=1.8",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.0",
+    "python-dotenv>=1.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["src*", "adaptive_rag_benchmark*", "benchmark_mocks*"]
+
+# The agent loads its prompts from a YAML file next to the module. After
+# `pip install .` that path resolves inside site-packages, so the file must
+# ship in the wheel or the import raises FileNotFoundError.
+[tool.setuptools.package-data]
+src = [
+    "config/prompts.yaml",
+    "rag/adaptive_RAG.png",
+]

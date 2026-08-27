@@ -147,3 +147,12 @@ status = "adapting"
 framework = "langgraph"
 source = "https://github.com/iblameandrew/open-deepthink"
 case = 1
+
+[[agents]]
+agent_id = "adaptive-rag"
+path = "resources/agents/17-adaptive-rag"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/dhruvsinghal09/Adaptive-Rag"
+case = 1
