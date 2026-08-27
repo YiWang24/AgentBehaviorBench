@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "event-research-benchmark"
+version = "0.1.0"
+description = "AgentBench adaptation of the bernatsampera/event-deep-research supervisor graph."
+requires-python = ">=3.12"
+# langgraph-cli (the dev server), pytest, and langfuse (hosted tracing, disabled
+# here) are not reached by the selected graph. Every other upstream dependency
+# is kept, including langchain-google-genai and langchain-ollama, which
+# init_chat_model imports when resolving a provider prefix.
+dependencies = [
+    "langgraph>=0.6.7",
+    "langchain>=0.3.27",
+    "langchain-openai>=0.3.33",
+    # Not an upstream dependency. Upstream defaults to Gemini, which the
+    # Interceptor cannot capture, and its OpenAI path is broken by an upstream
+    # bug (see the Agent README), so the benchmark pins Anthropic.
+    "langchain-anthropic>=1.4",
+    "langchain-google-genai>=2.1.9",
+    "langchain-ollama>=0.3.8",
+    "langchain-tavily>=0.2.11",
+    "tiktoken>=0.11.0",
+    "aiohttp>=3.8.0",
+    "python-dotenv>=0.9.9",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["src*", "event_research_benchmark*", "benchmark_mocks*"]

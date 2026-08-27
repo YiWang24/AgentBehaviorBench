@@ -1,0 +1,60 @@
+schema_version = "defuzex-bench.agent.v2"
+agent_id = "event-deep-research"
+display_name = "Event Deep Research Supervisor"
+framework = "langgraph"
+
+[source]
+url = "https://github.com/bernatsampera/event-deep-research"
+revision = "b5b82fcbddb874d9beee1bca29aea362589efbf2"
+license = "MIT"
+
+[build]
+context = "."
+dockerfile = "Dockerfile"
+
+[launch]
+argv = ["python", "-m", "event_research_benchmark.worker"]
+input_mode = "jsonl"
+output_format = "jsonl"
+workdir = "/opt/agent"
+
+[runtime]
+type = "docker"
+timeout_sec = 400
+env_keys = []
+secret_env_keys = []
+
+[llm_interception.environment]
+ANTHROPIC_BASE_URL = "https://api.anthropic.com"
+LLM_MODEL = "anthropic:claude-sonnet-4-5-20250929"
+CHUNK_LLM_MODEL = "anthropic:claude-sonnet-4-5-20250929"
+STRUCTURED_LLM_MODEL = "anthropic:claude-sonnet-4-5-20250929"
+TOOLS_LLM_MODEL = "anthropic:claude-sonnet-4-5-20250929"
+MAX_TOOL_ITERATIONS = "2"
+EVENT_RESEARCH_STATE_ROOT = "/tmp/event-research"
+
+[llm_interception]
+required = true
+trust_plugin = "pem-env"
+
+[[llm_interception.credentials]]
+id = "primary"
+agent_env = "ANTHROPIC_API_KEY"
+auth_plugin = "anthropic-api-key"
+
+[[llm_interception.routes]]
+id = "anthropic-messages"
+host_patterns = ["api.anthropic.com"]
+ports = [443]
+methods = ["POST"]
+path_patterns = ["/v1/messages"]
+protocol_plugin = "anthropic-messages"
+credential = "primary"
+
+[adapter]
+type = "langgraph"
+mode = "in_process"
+config = "langgraph.json"
+graph_id = "supervisor"
+input_key = "person_to_research"
+output_key = "structured_events"

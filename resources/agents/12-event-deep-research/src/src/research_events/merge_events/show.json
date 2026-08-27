@@ -1,0 +1,35 @@
+[
+  {
+    "name": "Henry Miller was born",
+    "description": "Henry Valentine Miller was born on December 26 in New York City.",
+    "date": {
+      "year": 1891,
+      "note": "December 26"
+    },
+    "location": "New York City",
+    "id": "henry_miller_born",
+    "new_information": "None"
+  },
+  {
+    "name": "Divorced Beatrice Sylvas Wickens",
+    "description": "Miller was divorced from Beatrice Sylvas Wickens.",
+    "date": {
+      "year": 1923,
+      "note": "December 21"
+    },
+    "location": "New York",
+    "id": "henry_miller_divorced_beatrice",
+    "new_information": "None"
+  },
+  {
+    "name": "Daughter Barbara born",
+    "description": "Miller and Beatrice had a daughter named Barbara.",
+    "date": {
+      "year": 1919,
+      "note": ""
+    },
+    "location": "New York",
+    "id": "henry_miller_daughter_barbara_born",
+    "new_information": "None"
+  }
+]
