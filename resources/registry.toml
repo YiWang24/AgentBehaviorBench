@@ -120,3 +120,12 @@ status = "adapting"
 framework = "langgraph"
 source = "https://github.com/bcefghj/medical-multi-agent-system"
 case = 1
+
+[[agents]]
+agent_id = "agentk-web-researcher"
+path = "resources/agents/14-agentk-web-researcher"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/mikekelly/AgentK"
+case = 1
