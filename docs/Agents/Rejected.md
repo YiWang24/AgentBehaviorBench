@@ -83,3 +83,42 @@ Reconsider when: a reviewed `google-genai` protocol plugin and a matching target
   to call OpenAI is explicitly not an acceptable workaround — it would change
   which model produces the briefings, which is the behaviour under test.
 ```
+
+---
+
+## License gate
+
+R8 requires a recorded, redistributable license. Vendoring a snapshot into this
+repository is redistribution, so a candidate with no license — or one whose
+license forbids commercial use or imposes copyleft on the benchmark — cannot be
+admitted, however good the adaptation would be.
+
+```text
+Agent rejected: stocks-insights-ai-agent
+Requirement: R8
+Reason code: SOURCE_OR_LICENSE_MISSING
+Reason: Licensed under Creative Commons Attribution-NonCommercial-ShareAlike
+  4.0. The NonCommercial term and the ShareAlike obligation both make it
+  unsuitable to vendor into this repository.
+Evidence:
+  - Reviewed revision: 375efb4
+  - LICENSE.md declares CC BY-NC-SA 4.0.
+Reconsider when: upstream relicenses under a permissive software license. CC
+  licenses are not intended for software and no adaptation can work around the
+  NonCommercial term.
+```
+
+```text
+Agent rejected: FinchainAgent, Paper-Agent, MultiAgenticRAG
+Requirement: R8
+Reason code: SOURCE_OR_LICENSE_MISSING
+Reason: No license file of any kind, so the default is all rights reserved and
+  the source may not be redistributed.
+Evidence:
+  - Reviewed revisions: FinchainAgent f6f04ed, Paper-Agent c68778f,
+    MultiAgenticRAG 05cc844.
+  - No file matching `licen[cs]e*` in any of the three repositories.
+  - Each is otherwise plausible: FinchainAgent compiles a workflow in main.py,
+    Paper-Agent and MultiAgenticRAG both build module-level graphs.
+Reconsider when: upstream adds a permissive license.
+```
