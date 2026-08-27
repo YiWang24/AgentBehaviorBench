@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "career_assistant": "./src/career_benchmark/graph.py:graph"
+  },
+  "env": ".env"
+}

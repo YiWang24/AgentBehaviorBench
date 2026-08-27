@@ -192,3 +192,12 @@ status = "adapting"
 framework = "langgraph"
 source = "https://github.com/john-adeojo/graph_websearch_agent"
 case = 1
+
+[[agents]]
+agent_id = "career-assistant"
+path = "resources/agents/22-career-assistant"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/amanv1906/GENAI-CareerAssistant-Multiagent"
+case = 1
