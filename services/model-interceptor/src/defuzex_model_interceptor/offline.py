@@ -8,6 +8,7 @@ Agent-agnostic instead of hard-coding tool names per Agent.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from typing import Any, Mapping
@@ -18,7 +19,7 @@ from .config import Route, Target
 OFFLINE_TARGET_PLUGIN = "offline-mock"
 OFFLINE_TEXT = "offline verification reply"
 _JSON_HEADERS = {"Content-Type": "application/json"}
-_TOOL_CALL_ID = "call_offline_verify"
+_TOOL_CALL_PREFIX = "call_offline_verify"
 
 
 class OfflineResponseError(ValueError):
@@ -82,12 +83,13 @@ class OfflineMockTarget:
 
         payload = _decode(content, OfflineResponseError)
         model = target.model
+        token = _fingerprint(content)
         if route.protocol_plugin == "anthropic-messages":
-            body = _anthropic_messages(payload, model)
+            body = _anthropic_messages(payload, model, token)
         elif route.protocol_plugin == "openai-responses":
-            body = _openai_responses(payload, model)
+            body = _openai_responses(payload, model, token)
         else:
-            body = _openai_chat(payload, model)
+            body = _openai_chat(payload, model, token)
         return OfflineResponse(
             status=200,
             headers=dict(_JSON_HEADERS),
@@ -108,15 +110,36 @@ def _decode(content: bytes, error: type[Exception]) -> dict[str, Any]:
     return payload
 
 
+def _fingerprint(content: bytes) -> str:
+    """Short, deterministic tag for one request body.
+
+    Reply identifiers must differ between successive turns. LangGraph's
+    ``add_messages`` reducer deduplicates by message id, so a constant id makes
+    the second assistant reply overwrite the first instead of appending: the
+    tool result stays last in the list and the agent's own routing then reads
+    ``tool_calls`` off a tool message. Hashing the request body keeps replies
+    reproducible for identical input while still separating distinct turns.
+    """
+
+    return hashlib.sha256(content).hexdigest()[:12]
+
+
 def _has_tool_result(messages: object) -> bool:
     """Detect that a tool already ran, so the reply must end the agent loop."""
 
     if not isinstance(messages, list):
         return False
     for item in messages:
-        if isinstance(item, dict) and item.get("role") == "tool":
+        if not isinstance(item, dict):
+            continue
+        # OpenAI chat completions.
+        if item.get("role") == "tool":
             return True
-        if isinstance(item, dict) and item.get("role") == "user":
+        # OpenAI Responses API: tool output is a typed item with no role.
+        if item.get("type") in ("function_call_output", "computer_call_output"):
+            return True
+        # Anthropic messages.
+        if item.get("role") == "user":
             content = item.get("content")
             if isinstance(content, list) and any(
                 isinstance(block, dict) and block.get("type") == "tool_result"
@@ -202,7 +225,7 @@ def _structured_content(payload: Mapping[str, Any]) -> str | None:
     return json.dumps(_arguments_for(schema), ensure_ascii=False)
 
 
-def _openai_chat(payload: Mapping[str, Any], model: str) -> dict[str, Any]:
+def _openai_chat(payload: Mapping[str, Any], model: str, token: str) -> dict[str, Any]:
     structured = _structured_content(payload)
     tool = None if _has_tool_result(payload.get("messages")) else _first_tool(payload)
 
@@ -216,7 +239,7 @@ def _openai_chat(payload: Mapping[str, Any], model: str) -> dict[str, Any]:
             "content": None,
             "tool_calls": [
                 {
-                    "id": _TOOL_CALL_ID,
+                    "id": f"{_TOOL_CALL_PREFIX}_{token}",
                     "type": "function",
                     "function": {
                         "name": name,
@@ -231,7 +254,7 @@ def _openai_chat(payload: Mapping[str, Any], model: str) -> dict[str, Any]:
         finish_reason = "stop"
 
     return {
-        "id": "chatcmpl-defuzex-offline",
+        "id": f"chatcmpl-defuzex-offline-{token}",
         "object": "chat.completion",
         "created": 0,
         "model": model,
@@ -240,15 +263,18 @@ def _openai_chat(payload: Mapping[str, Any], model: str) -> dict[str, Any]:
     }
 
 
-def _openai_responses(payload: Mapping[str, Any], model: str) -> dict[str, Any]:
+def _openai_responses(
+    payload: Mapping[str, Any], model: str, token: str
+) -> dict[str, Any]:
     tool = None if _has_tool_result(payload.get("input")) else _first_tool(payload)
     if tool is not None:
         name, arguments = tool
+        call_id = f"{_TOOL_CALL_PREFIX}_{token}"
         output: list[dict[str, Any]] = [
             {
                 "type": "function_call",
-                "id": _TOOL_CALL_ID,
-                "call_id": _TOOL_CALL_ID,
+                "id": call_id,
+                "call_id": call_id,
                 "name": name,
                 "arguments": json.dumps(arguments, ensure_ascii=False),
             }
@@ -257,14 +283,14 @@ def _openai_responses(payload: Mapping[str, Any], model: str) -> dict[str, Any]:
         output = [
             {
                 "type": "message",
-                "id": "msg_defuzex_offline",
+                "id": f"msg_defuzex_offline_{token}",
                 "role": "assistant",
                 "status": "completed",
                 "content": [{"type": "output_text", "text": OFFLINE_TEXT}],
             }
         ]
     return {
-        "id": "resp-defuzex-offline",
+        "id": f"resp-defuzex-offline-{token}",
         "object": "response",
         "created_at": 0,
         "model": model,
@@ -274,19 +300,26 @@ def _openai_responses(payload: Mapping[str, Any], model: str) -> dict[str, Any]:
     }
 
 
-def _anthropic_messages(payload: Mapping[str, Any], model: str) -> dict[str, Any]:
+def _anthropic_messages(
+    payload: Mapping[str, Any], model: str, token: str
+) -> dict[str, Any]:
     tool = None if _has_tool_result(payload.get("messages")) else _first_tool(payload)
     if tool is not None:
         name, arguments = tool
         content: list[dict[str, Any]] = [
-            {"type": "tool_use", "id": _TOOL_CALL_ID, "name": name, "input": arguments}
+            {
+                "type": "tool_use",
+                "id": f"{_TOOL_CALL_PREFIX}_{token}",
+                "name": name,
+                "input": arguments,
+            }
         ]
         stop_reason = "tool_use"
     else:
         content = [{"type": "text", "text": OFFLINE_TEXT}]
         stop_reason = "end_turn"
     return {
-        "id": "msg-defuzex-offline",
+        "id": f"msg-defuzex-offline-{token}",
         "type": "message",
         "role": "assistant",
         "model": model,

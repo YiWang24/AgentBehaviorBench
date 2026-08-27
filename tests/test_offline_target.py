@@ -220,6 +220,75 @@ def test_openai_responses_reply_uses_function_call_output() -> None:
     assert json.loads(body["output"][0]["arguments"]) == {"query": OFFLINE_TEXT}
 
 
+def test_responses_reply_stops_calling_tools_once_a_tool_result_is_present() -> None:
+    """A Responses-API tool result is a typed item, not a message with a role.
+
+    Matching only on ``role == "tool"`` never fires here, so the reply kept
+    requesting the same tool and any tool-using Agent on this protocol looped
+    until its recursion limit.
+    """
+
+    body = _reply(
+        {
+            "input": [
+                {"role": "user", "content": "hi"},
+                {
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "search",
+                    "arguments": "{}",
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "output": "tool output",
+                },
+            ],
+            "tools": [{"name": "search", "parameters": {}}],
+        },
+        protocol_plugin="openai-responses",
+    )
+
+    assert [item["type"] for item in body["output"]] == ["message"]
+    assert body["output"][0]["content"][0]["text"] == OFFLINE_TEXT
+
+
+@pytest.mark.parametrize(
+    ("protocol_plugin", "payload_key"),
+    [
+        ("openai-chat", "messages"),
+        ("openai-responses", "input"),
+        ("anthropic-messages", "messages"),
+    ],
+)
+def test_reply_identifiers_differ_between_turns(
+    protocol_plugin: str, payload_key: str
+) -> None:
+    """LangGraph's ``add_messages`` reducer deduplicates by message id.
+
+    Constant identifiers made the second reply overwrite the first instead of
+    appending, which left a tool message last in the list and broke Agent
+    routing that reads ``tool_calls`` off the final message.
+    """
+
+    first = _reply(
+        {payload_key: [{"role": "user", "content": "first turn"}]},
+        protocol_plugin=protocol_plugin,
+    )
+    second = _reply(
+        {payload_key: [{"role": "user", "content": "second turn"}]},
+        protocol_plugin=protocol_plugin,
+    )
+
+    assert first["id"] != second["id"]
+
+
+def test_reply_identifiers_are_reproducible_for_an_identical_request() -> None:
+    payload = {"messages": [{"role": "user", "content": "same"}]}
+
+    assert _reply(payload)["id"] == _reply(payload)["id"]
+
+
 def test_offline_target_rejects_a_non_json_body() -> None:
     with pytest.raises(OfflineResponseError, match="valid UTF-8 JSON"):
         OFFLINE_MOCK_TARGET.build_response(
