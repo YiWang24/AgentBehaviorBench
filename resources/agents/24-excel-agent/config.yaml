@@ -1,0 +1,17 @@
+# Benchmark configuration.
+#
+# Upstream ships config.example.yaml pointing at self-hosted vLLM/Ollama
+# endpoints. The benchmark uses the plain OpenAI path, which is what the Model
+# Interceptor captures. Values are expanded from the environment by
+# config._expand_env_vars, so no credential is written here.
+model:
+  active: "openai"
+  providers:
+    openai:
+      description: "Benchmark provider"
+      provider: "openai"
+      model_name: "${EXCEL_MODEL}"
+      api_key: "${OPENAI_API_KEY}"
+      base_url: "${OPENAI_BASE_URL}"
+      temperature: 0.1
+      max_tokens: 2048

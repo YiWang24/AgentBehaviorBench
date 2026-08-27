@@ -210,3 +210,12 @@ status = "adapting"
 framework = "langgraph"
 source = "https://github.com/artnoage/Podcast"
 case = 1
+
+[[agents]]
+agent_id = "excel-agent"
+path = "resources/agents/24-excel-agent"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/Gen-Future/ExcelMind"
+case = 1

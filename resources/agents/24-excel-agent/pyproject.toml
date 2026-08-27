@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "excel-agent-benchmark"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "langchain>=0.3,<1",
+    "langgraph>=0.2,<1",
+    "langchain-core>=0.3,<1",
+    "langchain-openai>=0.2,<1",
+    "pandas>=2.0",
+    "openpyxl>=3.1",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "pyyaml>=6.0",
+    # Not installed: fastapi/uvicorn/python-multipart (the upload API is not
+    # the entry point) and chromadb (the knowledge base is not on the graph
+    # path; its module is not vendored).
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
