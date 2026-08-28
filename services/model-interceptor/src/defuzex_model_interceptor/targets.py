@@ -33,6 +33,10 @@ class OpenAICompatibleTarget:
     """
 
     name: str
+    # Providers differ in how much of the OpenAI surface they serve. Naming the
+    # subset here turns an unsupported protocol into one clear routing error,
+    # instead of a 404 from an endpoint the provider never published.
+    protocols: frozenset[str] | None = None
 
     _ENDPOINTS = {
         "openai-chat": "/chat/completions",
@@ -47,13 +51,13 @@ class OpenAICompatibleTarget:
         route: Route,
         target: Target,
     ) -> PreparedTargetRequest:
-        try:
-            endpoint = self._ENDPOINTS[route.protocol_plugin]
-        except KeyError as exc:
+        protocol = route.protocol_plugin
+        supported = self.protocols is None or protocol in self.protocols
+        endpoint = self._ENDPOINTS.get(protocol)
+        if endpoint is None or not supported:
             raise TargetRoutingError(
-                f"{self.name} does not support source protocol "
-                f"{route.protocol_plugin!r}"
-            ) from exc
+                f"{self.name} does not support source protocol {protocol!r}"
+            )
 
         content = getattr(request, "content", b"") or b""
         try:
@@ -98,4 +102,5 @@ class OpenAICompatibleTarget:
 
 
 OPENROUTER_TARGET = OpenAICompatibleTarget("openrouter")
-DEEPSEEK_TARGET = OpenAICompatibleTarget("deepseek")
+# DeepSeek publishes only the chat endpoint; /responses and /messages 404 there.
+DEEPSEEK_TARGET = OpenAICompatibleTarget("deepseek", frozenset({"openai-chat"}))

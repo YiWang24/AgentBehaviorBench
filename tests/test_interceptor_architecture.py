@@ -266,8 +266,15 @@ def test_deepseek_is_registered_and_shares_the_openai_compatible_adapter() -> No
     assert b'"model":"deepseek-chat"' in request.content
 
 
-def test_an_unsupported_source_protocol_names_the_provider_that_refused_it() -> None:
-    """DeepSeek exposes no /responses endpoint; the error must not say OpenRouter."""
+@pytest.mark.parametrize(
+    "protocol", ["openai-responses", "anthropic-messages", "json-http"]
+)
+def test_deepseek_refuses_protocols_it_does_not_publish(protocol: str) -> None:
+    """Rewriting these onto DeepSeek produced a bare upstream 404 instead.
+
+    The provider serves only /chat/completions, so routing must fail here with a
+    reason rather than at an endpoint that was never published.
+    """
 
     from defuzex_model_interceptor.targets import DEEPSEEK_TARGET, TargetRoutingError
 
@@ -276,13 +283,21 @@ def test_an_unsupported_source_protocol_names_the_provider_that_refused_it() -> 
         host_patterns=("api.openai.com",),
         ports=(443,),
         methods=("POST",),
-        path_patterns=("/v1/embeddings",),
-        protocol_plugin="json-http",
+        path_patterns=("/v1/anything",),
+        protocol_plugin=protocol,
         credential_id="primary",
     )
 
-    with pytest.raises(TargetRoutingError, match="deepseek"):
+    with pytest.raises(TargetRoutingError, match=f"deepseek.*{protocol}"):
         DEEPSEEK_TARGET.prepare_request(object(), route=route, target=object())
+
+
+def test_openrouter_still_accepts_every_endpoint_it_publishes() -> None:
+    """Declaring DeepSeek's subset must not narrow the shared adapter."""
+
+    from defuzex_model_interceptor.targets import OPENROUTER_TARGET
+
+    assert OPENROUTER_TARGET.protocols is None
 
 
 def test_trace_redaction_covers_headers_fields_and_literal_secrets() -> None:
