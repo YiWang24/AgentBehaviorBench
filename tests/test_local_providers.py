@@ -219,6 +219,28 @@ class TestLocalJudgeProvider:
         assert model.prompts == []
         assert "container died" in report["issues"][0]["message"]
 
+    @pytest.mark.parametrize(
+        "output",
+        ["", "   ", None, [], {}],
+        ids=["empty", "blank", "none", "empty-list", "empty-mapping"],
+    )
+    def test_empty_output_counts_as_unanswered_here_too(self, output: Any) -> None:
+        """The two Judges must agree on what "answered" means.
+
+        The startup Judge already treats an empty container as no answer. When
+        this one disagreed, the same Run could pass startup verification and then
+        be graded as having produced output worth weighing.
+        """
+
+        model = _FakeModel({"status": PASS})
+
+        report = LocalJudgeProvider(model=model).judge(
+            _history(_Submission(output=output))
+        )
+
+        assert report["status"] == INSUFFICIENT
+        assert model.prompts == []
+
     def test_a_partially_answered_run_still_reaches_the_model(self) -> None:
         model = _FakeModel({"status": ISSUE, "confidence": 0.5, "summary": "mixed"})
 

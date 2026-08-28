@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..protocols.providers import JudgeContext
+from ..submission import COMPLETED, answered, failure_reason
 from .chat import ChatModel, LocalProviderError
 from .prompts import JUDGE_SYSTEM, judge_prompt
 
@@ -19,7 +20,6 @@ INSUFFICIENT = "insufficient_evidence"
 STATUSES = frozenset({PASS, ISSUE, INSUFFICIENT})
 
 MAX_OUTPUT_CHARS = 4000
-COMPLETED = "completed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +44,7 @@ class LocalJudgeProvider:
                 summary="The Run produced no submissions to judge.",
                 stop_reason="empty_history",
             )
-        if all(_unanswered(item) for item in history):
+        if not any(answered(item) for item in history):
             # Every step failed, so there is nothing for a model to weigh. Saying
             # so directly is both cheaper and more honest than asking it to.
             return _report(
@@ -100,21 +100,8 @@ def _rubric(context: JudgeContext) -> dict[str, str]:
     return spec
 
 
-def _unanswered(item: Any) -> bool:
-    submission = item.submission
-    if submission.status != COMPLETED:
-        return True
-    output = submission.output
-    if output is None:
-        return True
-    return isinstance(output, str) and not output.strip()
-
-
 def _failure_text(item: Any) -> str:
-    submission = item.submission
-    if submission.status != COMPLETED:
-        return f"Step finished as {submission.status!r}: {submission.error or 'no error reported'}"
-    return "Step completed but returned no output"
+    return f"Step {failure_reason(item)}"
 
 
 def _transcript(history: Sequence[Any]) -> str:

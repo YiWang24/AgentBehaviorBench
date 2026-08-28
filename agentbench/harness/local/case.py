@@ -61,7 +61,7 @@ class LocalCaseProvider:
                 **spec,
             ),
         )
-        steps = _steps(reply, max_inputs=context.max_inputs)
+        inputs, targets = _steps(reply, max_inputs=context.max_inputs)
         return {
             "case_id": CASE_ID,
             "input_type": "text",
@@ -69,9 +69,9 @@ class LocalCaseProvider:
                 "rule": "behavior_spec",
                 "behaviors_to_test": spec["behaviors_to_test"],
                 "prohibited_behaviors": spec["prohibited_behaviors"],
-                "targets": {step["input_id"]: step.pop("_targets") for step in steps},
+                "targets": targets,
             },
-            "inputs": steps,
+            "inputs": inputs,
         }
 
 
@@ -90,15 +90,21 @@ def _behavior_spec(sections: Mapping[str, str]) -> dict[str, str]:
     return spec
 
 
-def _steps(reply: Mapping[str, Any], *, max_inputs: int) -> list[dict[str, Any]]:
-    """Turn the model's answer into Inputs, or say precisely why it is unusable."""
+def _steps(
+    reply: Mapping[str, Any], *, max_inputs: int
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """Turn the model's answer into Inputs, or say precisely why it is unusable.
+
+    Returns the Inputs alongside the behavior each one targets, keyed by
+    ``input_id``. The targets travel separately because they belong to the Case
+    rubric rather than to the payload an Agent receives.
+    """
 
     raw = reply.get("steps")
     if not isinstance(raw, list) or not raw:
-        raise LocalProviderError(
-            "Local Case generation returned no steps"
-        )
-    steps: list[dict[str, Any]] = []
+        raise LocalProviderError("Local Case generation returned no steps")
+    inputs: list[dict[str, Any]] = []
+    targets: dict[str, str] = {}
     for index, item in enumerate(raw[:max_inputs], start=1):
         if not isinstance(item, Mapping):
             raise LocalProviderError("Local Case generation returned an invalid step")
@@ -107,17 +113,18 @@ def _steps(reply: Mapping[str, Any], *, max_inputs: int) -> list[dict[str, Any]]
             raise LocalProviderError(
                 f"Local Case generation returned an empty prompt for step {index}"
             )
-        steps.append(
+        # Numbering here rather than trusting the model keeps input_ids unique
+        # and valid even when it repeats or invents one.
+        input_id = f"{STEP_PREFIX}_{index}"
+        inputs.append(
             {
-                # Numbering here rather than trusting the model keeps input_ids
-                # unique and valid even when it repeats or invents one.
-                "input_id": f"{STEP_PREFIX}_{index}",
+                "input_id": input_id,
                 "payload_type": "text",
                 "payload": prompt.strip()[:MAX_PROMPT_CHARS],
-                "_targets": str(item.get("targets") or "").strip(),
             }
         )
-    return steps
+        targets[input_id] = str(item.get("targets") or "").strip()
+    return inputs, targets
 
 
 __all__ = ["BEHAVIOR_SECTIONS", "CASE_ID", "LocalCaseProvider"]
