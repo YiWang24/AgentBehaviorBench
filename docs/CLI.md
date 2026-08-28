@@ -52,14 +52,15 @@ Current subcommands:
 | --- | --- |
 | `run` | Run all enabled Agents whose status is `ready`. |
 | `view` | Open an existing JSONL result in the local web viewer. |
-| `verify` | Run one Agent through a real SDK Run with local Providers: a credential-free startup check, or a full graded benchmark. |
+| `verify` | Check one Agent as far as this host can: a credential-free preflight, then a graded benchmark with local Providers. |
 | `certify` | Verify one `adapting` Agent can complete its requested Cases and promote it to `ready`. |
 
 `verify` is the only command that runs without `DEFUZEX_API_KEY`: it supplies its
-own Case and Judge Providers instead of calling the DefuzeX Backend. By default it
-also needs no model credential and no network at all. `--model-source deepseek`
-trades that hermetic property for real model replies, and needs only
-`DEEPSEEK_API_KEY`. Use `verify` while adapting an Agent, before `certify`.
+own Case and Judge Providers instead of calling the DefuzeX Backend. Its first
+phase needs no credential, no network, and not even the DefuzeX SDK; only the
+graded benchmark that follows needs `DEEPSEEK_API_KEY`, and a host without one
+stops after preflight instead of failing. Use `verify` while adapting an Agent,
+before `certify`.
 
 ## 2. Default Command and Compatibility
 
@@ -193,27 +194,35 @@ Viewer action? [r rerun/q quit]:
 
 ### 4.1 What It Answers
 
-`verify` answers one of two questions, selected with `--mode`, and never changes
-the Registry:
+`verify` runs in one direction and stops at the first thing that is missing. It
+never changes the Registry.
 
-| `--mode` | Question | Case | Judge |
+| Phase | Question | Needs | If it fails |
 | --- | --- | --- | --- |
-| `startup` (default) | Does this Agent run, and is its model traffic observable? | A fixed probe | Was every Input answered? |
-| `benchmark` | Does this Agent behave as its requirement says? | Generated from the requirement | Graded against the declared behaviors |
+| 1. Preflight | Does this Agent run, and is its model traffic observable? | Docker only | `FAIL` (exit `1`) |
+| 2. Provider check | Can this host grade the Agent at all? | DefuzeX SDK, `DEEPSEEK_API_KEY` | `PARTIAL` (exit `0`) |
+| 3. Benchmark | Does this Agent behave as its requirement says? | A live model | `FAIL` (exit `1`) |
 
-`benchmark` runs **the same flow as `certify`** — the registry's Case count, a real
-model, an archived result log — with the local Provider pair in place of the
-official Case and Judge services. That is the point: it exercises the SDK the way
-an official run does, without a DefuzeX credential.
+The ordering is the point. Preflight uses **no credentials and not even the
+DefuzeX SDK**: it starts the container and invokes the adapter directly, so an
+Agent stays checkable on a host where nothing else is configured yet. Only once
+the Agent has proven itself is the host asked whether it can grade it — and a
+host that cannot is not an Agent that failed, which is why a missing SDK or key
+stops the run without failing it.
 
-The DefuzeX SDK drives the Run exactly as it does for `run` and `certify`: the
-same `create_run` call, the same strict `get_input`/`submit` handshake, the same
-`TestReport`. What differs is that `verify` supplies both the Case Provider and the
-Judge Provider itself, which selects the SDK's **local Provider mode**. With a
-custom pair the SDK builds no Backend client at all, so no credential is resolved
-and no request leaves the process.
+The benchmark phase runs **the same flow as `certify`** — the registry's Case
+count, a real model, an archived result log — with the local Provider pair in
+place of the official Case and Judge services. That is the point: it exercises
+the SDK the way an official run does, without a DefuzeX credential.
 
-### 4.2 How Benchmark Mode Works
+There the DefuzeX SDK drives the Run exactly as it does for `run` and `certify`:
+the same `create_run` call, the same strict `get_input`/`submit` handshake, the
+same `TestReport`. What differs is that `verify` supplies both the Case Provider
+and the Judge Provider itself, which selects the SDK's **local Provider mode**.
+With a custom pair the SDK builds no Backend client at all, so no credential is
+resolved and no request leaves the process.
+
+### 4.2 How The Benchmark Phase Works
 
 #### Where the Cases come from
 
@@ -252,18 +261,37 @@ Two orderings surprise people reading the code: the Agent container starts
 **before** judging begins.
 
 ```text
-verify --mode benchmark <agent_id>
+verify <agent_id>
 
   0  parse args, load .env
-     --inputs defaults to 3; --model-source is forced to a live provider
-
-  1  preflight — nothing is built yet
      registry.find(agent_id, enabled_only=False)
      runtime.type must be "docker", [llm_interception] must be declared
+     a rejection here exits 2 — nothing has been built
 
-  2  assemble
-     DeepSeekProvider.resolve()      a missing key stops the run right here
-     ChatModel.from_environment()    the model that writes and grades Cases
++-- PREFLIGHT · no credentials, no SDK, egress blocked ------------------+
+
+  1a agent_runner.start()
+       build agent image, build interceptor image, create --internal network
+       start interceptor, then agent sharing its netns
+       model target = offline-mock, so replies never leave the host
+
+  1b running.invoke(probe) × --probes            <- the adapter, not the SDK
+       every probe must return non-empty output
+
+  1c trace_state.checkpoint()
+       at least one llm_request/llm_response pair must have been captured
+
+     the container is stopped here; the benchmark starts a fresh one
+
++-- PROVIDER CHECK · what this host can do ------------------------------+
+
+  2a import defuzex                    is the KUMA SDK installed at all
+  2b ChatModel.from_environment()      the model that writes and grades Cases
+  2c DeepSeekProvider.resolve()        the model the Agent will answer with
+
+     any of these missing -> PARTIAL, exit 0, phase 3 never runs
+
++-- BENCHMARK · the certify flow with local Providers -------------------+
 
   3  suite
      new_suite_id()  ·  log: run_started
@@ -271,9 +299,9 @@ verify --mode benchmark <agent_id>
 
 +-- per Case · repeated `case` times, from the registry -----------------+
 
-  4a agent_runner.start()
+  4a agent_runner.start()                       <- a second container, live now
        build agent image, build interceptor image
-       create network
+       create network with normal egress
        start interceptor, then agent sharing its netns
        iptables nat OUTPUT REDIRECT  ·  CA injected per trust_plugin
 
@@ -310,9 +338,14 @@ verify --mode benchmark <agent_id>
 +-----------------------------------------------------------------------+
 
   5  log: suite_completed
-     _build_report()   every Case must pass, not only the last one
+     _benchmark_report()   every Case must pass, not only the last one
      print_report() or --json
 ```
+
+The Agent's container is started twice — once by preflight with egress blocked,
+once by the benchmark with a live model. That is deliberate: the two phases make
+opposite guarantees about the network, so sharing a container would mean one of
+them was not actually under the conditions it claims.
 
 #### Which model calls are the Agent's
 
@@ -328,64 +361,55 @@ as captured traffic:
 | (3) judge the Run | Host | No | No |
 
 An Agent declaring `case = 2` run with `--inputs 3` therefore issues
-`2 × (1 + 3 + 1) = 10` provider requests, and its report shows `6` captured
-pairs. A count that included Case generation and judging would be describing the
-harness, not the Agent.
+`2 × (1 + 3 + 1) = 10` provider requests during the benchmark, plus one per
+preflight probe. A count that included Case generation and judging would be
+describing the harness, not the Agent.
 
-#### What startup mode changes
+### 4.3 What Each Phase Guarantees
 
-Exactly three steps, and nothing else. Container orchestration, the Interceptor,
-the handshake loop, the SDK state machine, and the result log events are the same
-in both modes.
+The Case and Judge Providers are always local, so `DEFUZEX_API_KEY` is never read
+and the Registry is never written. What differs between the phases is where the
+Agent's own model replies come from:
 
-| Step | `startup` | `benchmark` |
+| | Preflight | Benchmark |
 | --- | --- | --- |
-| 4a network | `--internal`, plus `--add-host <host>:127.0.0.1` | Normal egress |
-| 4b Case | A fixed probe; no model call | Generated; call (1) |
-| 4d Judge | Was every Input answered; no model call | Graded; call (3) |
+| Model replies | Synthesized in the interceptor (`offline-mock`) | Real DeepSeek API |
+| Egress | Blocked (`--internal`, plus `--add-host <host>:127.0.0.1`) | Open |
+| Credential | None | `DEEPSEEK_API_KEY` |
+| DefuzeX SDK | Not imported | Drives the Run |
+| Case | None — the adapter is invoked directly | Generated from the requirement |
+| Judge | None — non-empty output is the whole check | Graded against the declared behaviors |
+| Result log | None | `results/verify-<agent_id>.jsonl` |
 
-### 4.3 Model Sources
-
-Two things vary and nothing else does. The Case and Judge Providers are always
-local. The model replies come from either the offline mock or a real provider,
-selected with `--model-source`:
-
-| `--model-source` | Model replies | Egress | Credential |
-| --- | --- | --- | --- |
-| `offline` (default) | Synthesized in the interceptor | Blocked (`--internal`) | None |
-| `deepseek` | Real DeepSeek API | Open | `DEEPSEEK_API_KEY` |
-
-`DEFUZEX_API_KEY` is never read in either mode, and the Registry is never written.
-
-Under the default `offline` source the whole run is hermetic:
+Preflight is therefore hermetic:
 
 - no `DEFUZEX_API_KEY` and no `OPENROUTER_API_KEY` are read;
-- the SDK is imported and used, but only its local Provider path runs, so it
-  never contacts the DefuzeX Backend;
+- the DefuzeX SDK is never imported, so a host without it still gets an answer;
 - the container network is created with `--internal`, so nothing reaches the
   internet;
 - model replies are generated inside the Model Interceptor by the `offline-mock`
-  target, synthesized from whatever tools or response format the request declares;
-- results go to a temporary file that is deleted unless `--keep-artifacts` is given.
+  target, synthesized from whatever tools or response format the request declares.
+
+Preflight always sends `--probes` probes regardless of the Agent's `case` field,
+because it checks startup rather than coverage. The benchmark honors the declared
+count, the same way `run` and `certify` do.
 
 ### 4.4 Syntax
 
 ```text
-agentbench verify [-h] [--env-file PATH] [--mode {startup,benchmark}]
-                  [--input TEXT] [--inputs N] [--keep-artifacts] [--json]
-                  [--model-source {offline,deepseek}] [--model MODEL]
-                  [--provider-model MODEL] [--output PATH]
+agentbench verify [-h] [--env-file PATH] [--input TEXT] [--probes N]
+                  [--inputs N] [--preflight-only] [--model MODEL]
+                  [--provider-model MODEL] [--output PATH] [--json]
                   [--llm-trace {off,terminal}]
                   [--llm-trace-max-bytes BYTES] agent_id
 ```
 
 ```powershell
 python -m agentbench verify langgraph-customer-support-agent
-python -m agentbench verify swe-agent --inputs 3 --llm-trace terminal
-python -m agentbench verify swe-agent --input "@prompts\probe.txt" --keep-artifacts
-python -m agentbench verify swe-agent --model-source deepseek
-python -m agentbench verify langgraph-chat-agent --mode benchmark
-python -m agentbench verify swe-agent --mode benchmark --inputs 5
+python -m agentbench verify swe-agent --preflight-only --probes 3
+python -m agentbench verify swe-agent --input "@prompts\probe.txt" --preflight-only
+python -m agentbench verify langgraph-chat-agent --inputs 5
+python -m agentbench verify swe-agent --model deepseek-reasoner --llm-trace terminal
 ```
 
 ### 4.5 Arguments
@@ -394,22 +418,21 @@ python -m agentbench verify swe-agent --mode benchmark --inputs 5
 | --- | --- | --- | --- |
 | `agent_id` | Yes | - | Registered Agent ID. Disabled Agents and any `status` are accepted. |
 | `--env-file PATH` | No | Repository `.env` | Load host defaults from another dotenv file. |
-| `--mode {startup,benchmark}` | No | `startup` | Which question to answer. `benchmark` needs `DEEPSEEK_API_KEY` and implies a live model source. |
-| `--input TEXT` | No | Short generic prompt | Probe text, or `@PATH` to read it from a file. Startup mode only. |
-| `--inputs N` | No | `1` / `3` | Startup probes, or Inputs to generate in benchmark mode. |
+| `--input TEXT` | No | Short generic prompt | Preflight probe text, or `@PATH` to read it from a file. |
+| `--probes N` | No | `1` | Preflight probes to send. |
+| `--inputs N` | No | `3` | Inputs to generate for the graded benchmark. |
+| `--preflight-only` | No | Run all phases | Stop after preflight. Needs no credentials and no DefuzeX SDK. |
+| `--model MODEL` | No | `DEEPSEEK_MODEL` | Model the Agent talks to during the benchmark. Preflight always answers from the interceptor. |
 | `--provider-model MODEL` | No | `DEEPSEEK_MODEL` | Model that writes the Case and grades the Run. Independent of `--model`. |
-| `--output PATH` | No | `results/verify-<agent_id>.jsonl` | Where to write the benchmark result log. Ignored in startup mode. |
-| `--keep-artifacts` | No | Delete | Keep the temporary result log and print its path. |
+| `--output PATH` | No | `results/verify-<agent_id>.jsonl` | Where to write the benchmark result log. Preflight writes no log. |
 | `--json` | No | Human report | Print one JSON summary and nothing else. |
-| `--model-source {offline,deepseek}` | No | `offline` | Where model replies come from. `deepseek` opens egress and needs `DEEPSEEK_API_KEY`. |
-| `--model MODEL` | No | `DEEPSEEK_MODEL` or `deepseek-chat` | Model slug for the selected source. |
 | `--llm-trace {off,terminal}` | No | `off` | Also dump every captured payload. Debugging only. |
 | `--llm-trace-max-bytes BYTES` | No | `262144` | Maximum captured bytes per request or response. |
 | `-h`, `--help` | No | - | Show `verify` help and exit. |
 
-Startup mode always runs exactly **one** Case regardless of the Agent's `case`
-field, because it checks startup rather than coverage. Benchmark mode honors the
-declared count, the same way `run` and `certify` do.
+`--preflight-only` is the check to repeat while adapting an Agent: it is the
+cheapest phase, needs nothing configured, and answers the only question that
+matters before the Agent runs at all.
 
 ### 4.6 Agent Requirements
 
@@ -426,62 +449,91 @@ so a stubbed secret never passes silently.
 
 ### 4.7 Verdict
 
-Verification passes when all of the following hold:
+There are four, and only two of them mean something went wrong:
 
-- the Agent image builds and the container starts;
-- every probe input is invoked without a startup, runtime, or invocation error;
-- the SDK Judge returns `pass`;
-- at least one complete `llm_request`/`llm_response` pair is captured.
+| Verdict | Exit | Means |
+| --- | --- | --- |
+| `PASS` | `0` | Every phase that ran held. |
+| `PARTIAL` | `0` | Preflight held; this host could not grade the Agent. |
+| `FAIL` | `1` | Preflight or the graded Run failed. |
+| `ERROR` | `2` | The caller pointed `verify` at something it cannot answer for. |
 
-In **startup** mode the local Judge grades only health, never quality: it reports
-an issue when an Input came back unanswered — a non-`completed` submission, or
-output that is empty — and passes anything else. That distinction matters, because
-the model replies come from a local mock, so the Agent's wording carries no signal
-worth grading. An Agent whose reply is poor still passes; one that returns nothing
-does not.
+`PARTIAL` shares an exit code with `PASS` on purpose. A missing SDK or provider
+key is a gap in the host's own setup, not a defect in the Agent, and a CI job
+without a credential must not go red for it. `PARTIAL` names what was missing, so
+the gap is still visible rather than silently skipped.
 
-In **benchmark** mode the Judge grades behavior against the requirement, and the
-verdict is its verdict. Every Case must pass: an Agent that failed its first Case
-and passed its second has not passed. The report prints the per-Input decisions
-and the Judge's objections above the verdict.
+Preflight passes when the Agent image builds, the container starts, every probe
+returns non-empty output, and at least one complete `llm_request`/`llm_response`
+pair is captured. It never grades quality: the model replies come from a local
+mock, so the Agent's wording carries no signal worth judging. An Agent whose reply
+is poor still passes preflight; one that returns nothing does not.
 
-The SDK's own status is reported separately from the verdict, as `judge:` in the
-report and `sdk_judge_status` in the JSON. The two can differ: a Run the Judge
-passed still fails verification if none of its model traffic was observable.
+The benchmark grades behavior against the requirement, and its verdict is the
+Judge's. Every Case must pass: an Agent that failed its first Case and passed its
+second has not passed. The report prints the per-Input decisions and the Judge's
+objections above the verdict.
+
+The SDK's own status is reported separately, as `judge:` in the report and
+`benchmark.sdk_judge_status` in the JSON, because the two answer different
+questions — the Judge grades the Run, while the verdict also required preflight
+to have held first.
 
 ### 4.8 Report Layout
 
-The report has four sections: what is being checked, which stages passed, what the
-model exchanged, and the verdict.
+One column of stages, split by the three questions the run asks in order, then the
+model traffic, the judgment, and the verdict.
 
 ```text
 verify · langgraph-customer-support-agent
-       SDK local providers · no credentials · egress blocked · registry untouched
+       SDK local providers · no DefuzeX credentials · registry untouched
 
-  ✓  configuration   local providers
-  ✓  agent start     ContainerAgentAdapter
-  ✓  case            run_d9075725a90b41c…
-  ✓  agent run       2 model calls
++ PREFLIGHT ------------------------------------------------------------+
+  synthesized model replies · egress blocked · no credentials
+  Starting Agent... OK | ContainerAgentAdapter | 2 routes
+  Probing Agent... OK | 1/1 answered
+  Capturing model traffic... OK | 2 request/response pairs
+
++ PROVIDER CHECK -------------------------------------------------------+
+  DefuzeX SDK · local Case and Judge Providers
+  Checking DefuzeX SDK... OK | defuzex 4.0.0
+  Checking local Case and Judge Providers... OK | judged by deepseek-chat
+  Checking the Agent's model target... OK | deepseek-chat
+
++ BENCHMARK ------------------------------------------------------------+
+  live model deepseek-chat · egress open · judged by deepseek-chat
+  Checking benchmark configuration... OK | Provider mode: local
+  Starting Agent... OK | ContainerAgentAdapter
+  Generating Case with local Provider... OK | run=run_d9075725a90b41c
+  Running Agent inputs... OK | Judge: pass
 
      01  ▸ Reply with a short confirmation that you received thi…
          ◂ Tool: list_available_functions                  200 · 1.4ms
      02  ▸ Available Functions & Actions - search_vector_knowled…
-         ◂ offline verification reply                      200 · 0.8ms
+         ◂ a considered answer                             200 · 0.8ms
 
   PASS   1/1 cases · 2 model request/response pairs captured · judge: pass
+         log  results/verify-langgraph-customer-support-agent-20260828.jsonl
 ```
 
 The Case identifier is the SDK's own Run ID, so it can be correlated with the
 result log and with anything the SDK recorded.
 
-On a terminal the stage currently running is shown as a self-erasing live line, so
-only finished stages remain. Redirected output skips the live line entirely instead
-of writing every animation frame.
+These are the same stage lines `certify` prints. On a terminal the running stage
+is a self-erasing live line, so only finished stages remain; redirected output
+skips the live line entirely instead of writing every animation frame.
 
-A failure leads with the reason rather than a generic message:
+A run that stopped early prints only the sections it reached, and leads with the
+reason rather than a generic message:
 
 ```text
   FAIL   AgentStartError: container exited during startup
+```
+
+```text
+  PARTIAL   1/1 probes answered · 1 model request/response pair captured.
+            Benchmark skipped: Local Case generation and judging need
+            DEEPSEEK_API_KEY. Set it in the environment or .env.
 ```
 
 Call lists longer than ten are elided in the middle. Stubbed secrets, when any were
@@ -508,18 +560,22 @@ and the document are the whole contract:
   "command": "verify",
   "agent_id": "langgraph-customer-support-agent",
   "verdict": "pass",
-  "cases": {"completed": 1, "requested": 1},
-  "mode": "startup",
-  "sdk_judge_status": "pass",
-  "judgment": {
-    "provider_model": null,
-    "summary": null,
+  "preflight": {"probes_sent": 1, "probes_answered": 1},
+  "providers": {
+    "state": "ready",
+    "reason": null,
+    "provider_model": "deepseek-chat",
+    "agent_model": "deepseek-chat"
+  },
+  "benchmark": {
+    "ran": true,
+    "cases": {"completed": 1, "requested": 1},
+    "sdk_judge_status": "pass",
+    "summary": "Answered every prompt within its declared scope.",
     "issues": [],
-    "step_results": []
+    "step_results": [{"step_id": "step_1", "passed": true, "reason": "…"}]
   },
   "model_calls": {
-    "source": "offline",
-    "model": "offline-verify-model",
     "captured_pairs": 2,
     "calls": [
       {
@@ -533,39 +589,46 @@ and the document are the whole contract:
     ]
   },
   "substituted_secrets": [],
-  "result_log": null,
+  "result_log": "results/verify-langgraph-customer-support-agent-20260828.jsonl",
   "reason": null
 }
 ```
 
-`verdict` is `pass`, `fail`, or `error`; `error` covers the preflight rejections in
-section 4.4. It maps onto the exit codes in section 8 — `pass` is `0`, `fail` is `1`,
-`error` is `2` — so the document does not repeat the status the process already
-returns. `result_log` is populated only with `--keep-artifacts`.
+The document is grouped by the phase each fact came from, so how far the run got
+is readable without inferring it from nulls. `verdict` maps onto the exit codes in
+section 8 — `pass` and `partial` are `0`, `fail` is `1`, `error` is `2` — so the
+document does not repeat the status the process already returns.
 
-`sdk_judge_status` is the DefuzeX `TestReport` status — `pass`, `issue`, or
-`insufficient_evidence` — and is `null` when the Run never reached a report. It is
-reported separately from `verdict` because they answer different questions: the
-Judge grades the Run, while `verdict` also requires the model traffic to have been
-observable.
+`providers.state` is `ready`, `unavailable`, or `skipped`; `unavailable` carries
+the reason in `providers.reason`, and `skipped` means `--preflight-only` was
+given. `benchmark.ran` is `false` in both cases, and `result_log` is `null`
+because only a graded Run is archived.
 
-`model_calls.source` and `model_calls.model` record which model actually answered,
-so an archived summary cannot be mistaken for the other mode. `judgment` is empty
-in startup mode and carries the grading model, its summary, its objections, and
-one entry per Input in benchmark mode.
+`benchmark.sdk_judge_status` is the DefuzeX `TestReport` status — `pass`, `issue`,
+or `insufficient_evidence` — and is `null` when no Run reached a report.
 
-### 4.10 Live Model Notes
+### 4.10 Model Notes
 
-`--model-source deepseek` is useful when the offline mock's constant replies are
-what an Agent trips over — a graph that routes on reply content, or a framework
-that rejects a synthesized tool call. It costs real tokens, so it is opt-in.
+The two phases each pin their model source, so neither is selectable:
+
+- **Preflight is always offline.** That is what makes it free and hermetic.
+- **The benchmark always uses a real provider.** Grading synthesized replies would
+  say nothing about the Agent.
+
+This has one consequence worth knowing before it bites. An Agent that cannot cope
+with the offline mock's constant replies — a graph that routes on reply content,
+or a framework that rejects a synthesized tool call — fails preflight and never
+reaches the benchmark, even though it would work against a live model. Preflight
+is a gate, not a suggestion, and for such an Agent the fix is on the Agent's side:
+it has to tolerate a reply it did not expect, or its `[llm_interception]` routes
+have to describe a shape the mock can satisfy.
 
 DeepSeek serves only the OpenAI **chat** wire format. An Agent whose manifest
-routes `openai-responses` or `anthropic-messages` traffic cannot be served by it,
-and features layered on top of chat may still be refused — an Agent requesting
+routes `openai-responses` or `anthropic-messages` traffic cannot be graded against
+it, and features layered on top of chat may still be refused — an Agent requesting
 JSON-schema `response_format` currently gets `400 This response_format type is
-unavailable now`. Those are provider limits, not adapter defects: the offline
-source still verifies such an Agent.
+unavailable now`. Those are provider limits, not adapter defects: `--preflight-only`
+still verifies such an Agent.
 
 ## 5. `certify`
 
@@ -735,13 +798,13 @@ Review result files for sensitive data before sharing or submitting them.
 | Exit code | Commands | Meaning |
 | --- | --- | --- |
 | `0` | `run` | User cancelled, or all selected benchmarks passed. |
-| `0` | `verify` | The Agent started, answered every probe, and its model traffic was captured. |
+| `0` | `verify` | `PASS` — every phase that ran held — or `PARTIAL`, where preflight held but this host could not grade the Agent. |
 | `0` | `certify` | Certification completed and promoted the Agent, completed with Judge failures but still promoted, or the Agent was already `ready`. |
 | `0` | `view` | Viewer stopped normally. |
 | `1` | `run` | No runnable ready Agents, shared configuration failed, or at least one benchmark failed. |
-| `1` | `verify` | The Agent failed to start or complete a probe, or no model call was captured. |
+| `1` | `verify` | The Agent failed to start, failed a probe, had no model call captured, or did not pass the graded Run. |
 | `1` | `certify` | Certification did not complete because of shared configuration, startup, runtime, or invocation failure. |
-| `2` | `verify` | Agent does not exist, does not use the Docker runtime, declares no `[llm_interception]`, or `--inputs` was below 1. |
+| `2` | `verify` | Agent does not exist, does not use the Docker runtime, declares no `[llm_interception]`, or `--probes`/`--inputs` was below 1. |
 | `2` | `certify` | Agent does not exist, is disabled, has a disallowed state, or Registry update failed after certification completed. |
 | `2` | all commands | `argparse` detected an unknown command, unknown argument, or missing required argument. |
 
@@ -806,10 +869,13 @@ agentbench/cli/
   main.py                 root parser and feature dispatch
   execution.py            shared benchmark execution and result writing
   presentation.py         terminal display and interaction
+  progress.py             the animated stage column, shared by certify and verify
   registry_status.py      Registry status updates
   result_export.py        append-only JSONL writer
   trace_runtime.py        runner wiring for live provider traffic
-  offline_runtime.py      runner wiring for credential-free offline runs
+  verify_runtime.py       verify's two runtime stacks and shared trace sinks
+  verify_preflight.py     the SDK-free half: subject selection and probing
+  verify_providers.py     the KUMA SDK half: what this host can grade
   verify_report.py        sectioned verify report and JSON summary
   viewer.py               local HTTP viewer server
   TerminalUI/
@@ -820,18 +886,18 @@ agentbench/cli/
     __init__.py           FEATURES registry
     run.py                run arguments and workflow
     view.py               view arguments and workflow
-    verify.py             verify arguments and workflow
+    verify.py             verify arguments and phase orchestration
     certify.py            certify arguments and workflow
 
 agentbench/harness/offline/
-  run.py                  local SDK Run, probe inputs, and startup report
-  suite.py                suite runner that pins the local provider pair
-  secrets.py              placeholder secret resolution for offline runs
+  probe.py                the probe text preflight sends
+  secrets.py              placeholder secret resolution for credential-free runs
 ```
 
-The offline path deliberately keeps `execution.py` untouched: provider arguments
-are injected by `OfflineSuiteRunner` instead of widening the shared execution
-signature.
+Both `verify` phases deliberately keep `execution.py` untouched. Preflight never
+reaches it — it drives the adapter directly — and the benchmark's Provider
+arguments are injected by `LocalBenchmarkSuiteRunner` instead of widening the
+shared execution signature.
 
 When adding a subcommand:
 

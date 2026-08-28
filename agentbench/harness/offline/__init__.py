@@ -1,21 +1,16 @@
-"""Offline startup verification: real SDK Run, local Providers, no credentials."""
+"""The credential-free half of verification: no DefuzeX key, no SDK, no egress.
 
-from .providers import (
-    DEFAULT_PROBE_TEXT,
-    STATUS_ISSUE,
-    STATUS_PASS,
-    StartupCaseProvider,
-    StartupJudgeProvider,
-)
-from .secrets import OfflineSecretResolver
-from .suite import OfflineSuiteRunner
+What lives here is everything `verify`'s preflight needs. It is deliberately thin
+and SDK-free: an Agent has to be checkable before the DefuzeX SDK is installed,
+so preflight drives the adapter directly and the SDK only appears once the
+graded benchmark begins.
+"""
+
+from .probe import DEFAULT_PROBE_TEXT
+from .secrets import OfflineSecretResolver, placeholder_for
 
 __all__ = [
     "DEFAULT_PROBE_TEXT",
-    "STATUS_ISSUE",
-    "STATUS_PASS",
     "OfflineSecretResolver",
-    "OfflineSuiteRunner",
-    "StartupCaseProvider",
-    "StartupJudgeProvider",
+    "placeholder_for",
 ]

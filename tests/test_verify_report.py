@@ -3,21 +3,24 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from agentbench.cli.constants import ANSI_CYAN
 from agentbench.cli.presentation import ANSI_PATTERN, render_panel, visible_width
 from agentbench.cli.TerminalUI.call_log import CallRecord, CallRecorder
 from agentbench.cli.verify_report import (
     ERROR,
     FAIL,
     MAX_DISPLAYED_CALLS,
+    PARTIAL,
     PASS,
-    VerifyProgress,
+    PROVIDERS_READY,
+    PROVIDERS_SKIPPED,
+    PROVIDERS_UNAVAILABLE,
     VerifyReport,
     print_report,
+    print_section,
     truncate,
 )
-from agentbench.harness import BenchmarkProgress
 from agentbench.runtime.interception import TerminalTraceSink, TraceEvent
-from agentbench.cli.constants import ANSI_CYAN
 
 
 def _plain(line: str) -> str:
@@ -33,6 +36,38 @@ def _call(number: int, request: str = "ask", response: str = "reply") -> CallRec
         status=200,
         latency_ms=1.25,
     )
+
+
+def _verdict(output: list[str], badge: str) -> str:
+    """The verdict line, rejoined when a long reason wrapped across lines."""
+
+    collected: list[str] = []
+    for line in map(_plain, output):
+        text = line.strip()
+        if not collected:
+            if text.startswith(badge):
+                collected.append(text)
+            continue
+        if not text or text.startswith("log "):
+            break
+        collected.append(text)
+    assert collected, f"no {badge} line in {[_plain(line) for line in output]}"
+    return " ".join(collected)
+
+
+def _graded(**overrides) -> VerifyReport:
+    base = {
+        "agent_id": "demo",
+        "verdict": PASS,
+        "providers": PROVIDERS_READY,
+        "benchmark_ran": True,
+        "completed_cases": 1,
+        "requested_cases": 1,
+        "captured_pairs": 1,
+        "probes_sent": 1,
+        "probes_answered": 1,
+    }
+    return VerifyReport(**{**base, **overrides})
 
 
 # --- panel geometry ----------------------------------------------------------
@@ -59,6 +94,16 @@ def test_short_content_keeps_the_default_panel_width() -> None:
     short = render_panel("RUN QUEUED", ["ok"], ANSI_CYAN)
 
     assert visible_width(short[0]) == 78
+
+
+def test_a_section_states_what_that_phase_does_and_does_not_reach() -> None:
+    output: list[str] = []
+
+    print_section("PREFLIGHT", "egress blocked", output.append)
+
+    plain = [_plain(line) for line in output]
+    assert any("PREFLIGHT" in line for line in plain)
+    assert any("egress blocked" in line for line in plain)
 
 
 # --- preview truncation ------------------------------------------------------
@@ -121,55 +166,83 @@ def test_recorder_ignores_events_without_a_call_id() -> None:
     assert recorder.records == []
 
 
-# --- report rendering --------------------------------------------------------
+# --- verdicts ----------------------------------------------------------------
 
 
-def test_passing_report_states_cases_and_captured_pairs() -> None:
+def test_a_graded_pass_states_cases_and_captured_pairs() -> None:
     output: list[str] = []
-    report = VerifyReport(
-        agent_id="demo",
-        verdict=PASS,
-        completed_cases=1,
-        requested_cases=1,
-        captured_pairs=2,
-        calls=(_call(1), _call(2)),
-    )
 
-    print_report(report, output.append)
-    verdict = next(line for line in map(_plain, output) if line.strip().startswith("PASS"))
+    print_report(_graded(captured_pairs=2, calls=(_call(1), _call(2))), output.append)
 
+    verdict = _verdict(output, "PASS")
     assert "1/1 cases" in verdict
     assert "2 model request/response pairs captured" in verdict
 
 
 def test_a_single_captured_pair_is_not_pluralized() -> None:
     output: list[str] = []
+
+    print_report(_graded(), output.append)
+
+    assert "1 model request/response pair captured" in _verdict(output, "PASS")
+
+
+def test_a_preflight_only_pass_says_so_instead_of_claiming_cases() -> None:
+    """Nothing was graded, so the verdict must not read like a benchmark result."""
+
+    output: list[str] = []
     report = VerifyReport(
         agent_id="demo",
         verdict=PASS,
-        completed_cases=1,
-        requested_cases=1,
+        providers=PROVIDERS_SKIPPED,
+        probes_sent=2,
+        probes_answered=2,
+        captured_pairs=3,
+    )
+
+    print_report(report, output.append)
+
+    verdict = _verdict(output, "PASS")
+    assert "preflight only" in verdict
+    assert "2/2 probes answered" in verdict
+    assert "cases" not in verdict
+
+
+def test_a_partial_verdict_names_what_the_host_was_missing() -> None:
+    output: list[str] = []
+    report = VerifyReport(
+        agent_id="demo",
+        verdict=PARTIAL,
+        providers=PROVIDERS_UNAVAILABLE,
+        provider_reason="The DefuzeX (KUMA) SDK is not installed",
+        probes_sent=1,
+        probes_answered=1,
         captured_pairs=1,
     )
 
     print_report(report, output.append)
-    verdict = next(line for line in map(_plain, output) if line.strip().startswith("PASS"))
 
-    assert "1 model request/response pair captured" in verdict
+    verdict = _verdict(output, "PARTIAL")
+    assert "1/1 probes answered" in verdict
+    assert "Benchmark skipped" in verdict
+    assert "KUMA) SDK is not installed" in verdict
+
+
+def test_a_partial_verdict_does_not_fail_the_shell() -> None:
+    """A gap in the host's own setup must not turn a CI job red."""
+
+    assert VerifyReport(agent_id="demo", verdict=PARTIAL).exit_code == 0
 
 
 def test_failing_report_leads_with_the_reason() -> None:
     output: list[str] = []
     report = VerifyReport(
-        agent_id="demo",
-        verdict=FAIL,
-        reason="AgentStartError: container exited",
+        agent_id="demo", verdict=FAIL, reason="AgentStartError: container exited"
     )
 
     print_report(report, output.append)
-    verdict = next(line for line in map(_plain, output) if line.strip().startswith("FAIL"))
 
-    assert "AgentStartError: container exited" in verdict
+    assert "AgentStartError: container exited" in _verdict(output, "FAIL")
 
 
 def test_a_long_failure_reason_wraps_instead_of_running_off_the_report() -> None:
@@ -188,26 +261,22 @@ def test_a_long_failure_reason_wraps_instead_of_running_off_the_report() -> None
 
     print_report(report, output.append)
     plain = [_plain(line) for line in output if _plain(line).strip()]
-    rejoined = " ".join(line.strip() for line in plain)
 
     assert plain[0].strip().startswith("FAIL")
     assert all(len(line) <= 80 for line in plain), [len(line) for line in plain]
-    assert "AttributeError: 'str' object has no attribute 'get'" in rejoined
+    assert "AttributeError: 'str' object has no attribute 'get'" in " ".join(
+        line.strip() for line in plain
+    )
+
+
+# --- supporting detail -------------------------------------------------------
 
 
 def test_long_call_lists_are_elided_in_the_middle() -> None:
     output: list[str] = []
     calls = tuple(_call(index) for index in range(1, MAX_DISPLAYED_CALLS + 6))
-    report = VerifyReport(
-        agent_id="demo",
-        verdict=PASS,
-        completed_cases=1,
-        requested_cases=1,
-        captured_pairs=len(calls),
-        calls=calls,
-    )
 
-    print_report(report, output.append)
+    print_report(_graded(captured_pairs=len(calls), calls=calls), output.append)
     plain = [_plain(line) for line in output]
 
     assert any("5 more calls" in line for line in plain)
@@ -216,35 +285,33 @@ def test_long_call_lists_are_elided_in_the_middle() -> None:
 
 def test_stubbed_secrets_are_surfaced() -> None:
     output: list[str] = []
-    report = VerifyReport(
-        agent_id="demo",
-        verdict=PASS,
-        completed_cases=1,
-        requested_cases=1,
-        captured_pairs=1,
-        substituted_secrets=("OPENAI_API_KEY",),
-    )
 
-    print_report(report, output.append)
+    print_report(_graded(substituted_secrets=("OPENAI_API_KEY",)), output.append)
 
     assert any("OPENAI_API_KEY" in _plain(line) for line in output)
 
 
-def test_kept_result_log_is_printed_and_omitted_otherwise() -> None:
-    base = {
-        "agent_id": "demo",
-        "verdict": PASS,
-        "completed_cases": 1,
-        "requested_cases": 1,
-        "captured_pairs": 1,
-    }
+def test_per_step_judgments_are_shown_with_the_judge_s_reasoning() -> None:
+    output: list[str] = []
+    report = _graded(
+        step_results=(("step_1", True, "answered fully"), ("step_2", False, "ignored")),
+        judge_issues=("step_2 did not address the request",),
+    )
+
+    print_report(report, output.append)
+    plain = [_plain(line) for line in output]
+
+    assert any("step_1" in line and "answered fully" in line for line in plain)
+    assert any("step_2" in line and "ignored" in line for line in plain)
+    assert any("did not address the request" in line for line in plain)
+
+
+def test_result_log_is_printed_when_one_was_written_and_omitted_otherwise() -> None:
     with_log: list[str] = []
     without_log: list[str] = []
 
-    print_report(
-        VerifyReport(result_log=Path("/tmp/demo.jsonl"), **base), with_log.append
-    )
-    print_report(VerifyReport(**base), without_log.append)
+    print_report(_graded(result_log=Path("/tmp/demo.jsonl")), with_log.append)
+    print_report(_graded(), without_log.append)
 
     assert any("/tmp/demo.jsonl" in _plain(line) for line in with_log)
     assert not any("log " in _plain(line) for line in without_log)
@@ -253,13 +320,12 @@ def test_kept_result_log_is_printed_and_omitted_otherwise() -> None:
 # --- machine-readable summary ------------------------------------------------
 
 
-def test_json_summary_carries_the_verdict_and_every_call() -> None:
-    report = VerifyReport(
-        agent_id="demo",
-        verdict=PASS,
-        completed_cases=1,
+def test_json_summary_separates_the_three_phases() -> None:
+    report = _graded(
         requested_cases=2,
-        captured_pairs=1,
+        judge_status="pass",
+        provider_model="deepseek-chat",
+        agent_model="deepseek-reasoner",
         calls=(_call(1, request="ask something", response="answered"),),
         result_log=Path("/tmp/demo.jsonl"),
     )
@@ -268,17 +334,35 @@ def test_json_summary_carries_the_verdict_and_every_call() -> None:
 
     assert payload["command"] == "verify"
     assert payload["verdict"] == PASS
-    assert payload["cases"] == {"completed": 1, "requested": 2}
+    assert payload["preflight"] == {"probes_sent": 1, "probes_answered": 1}
+    assert payload["providers"]["state"] == PROVIDERS_READY
+    assert payload["providers"]["agent_model"] == "deepseek-reasoner"
+    assert payload["benchmark"]["ran"] is True
+    assert payload["benchmark"]["cases"] == {"completed": 1, "requested": 2}
+    assert payload["benchmark"]["sdk_judge_status"] == "pass"
     assert payload["model_calls"]["captured_pairs"] == 1
     assert payload["model_calls"]["calls"][0]["request_preview"] == "ask something"
     assert payload["result_log"] == "/tmp/demo.jsonl"
 
 
-def test_json_summary_of_a_preflight_error_has_no_counts() -> None:
+def test_json_summary_of_a_partial_run_carries_why_it_stopped() -> None:
     payload = json.loads(
         VerifyReport(
-            agent_id="demo", verdict=ERROR, reason="not registered"
+            agent_id="demo",
+            verdict=PARTIAL,
+            providers=PROVIDERS_UNAVAILABLE,
+            provider_reason="DEEPSEEK_API_KEY is not set",
         ).to_json()
+    )
+
+    assert payload["providers"]["state"] == PROVIDERS_UNAVAILABLE
+    assert payload["providers"]["reason"] == "DEEPSEEK_API_KEY is not set"
+    assert payload["benchmark"]["ran"] is False
+
+
+def test_json_summary_of_a_selection_error_has_no_counts() -> None:
+    payload = json.loads(
+        VerifyReport(agent_id="demo", verdict=ERROR, reason="not registered").to_json()
     )
 
     assert payload["verdict"] == ERROR
@@ -291,68 +375,16 @@ def test_the_shell_status_is_derived_from_the_verdict_and_left_out_of_the_json()
 
     codes = {
         verdict: VerifyReport(agent_id="demo", verdict=verdict).exit_code
-        for verdict in (PASS, FAIL, ERROR)
+        for verdict in (PASS, PARTIAL, FAIL, ERROR)
     }
 
-    assert codes == {PASS: 0, FAIL: 1, ERROR: 2}
+    assert codes == {PASS: 0, PARTIAL: 0, FAIL: 1, ERROR: 2}
     assert "exit_code" not in json.loads(
         VerifyReport(agent_id="demo", verdict=PASS).to_json()
     )
 
 
-# --- stage lines -------------------------------------------------------------
-
-
-def test_stage_lines_report_each_boundary_once() -> None:
-    output: list[str] = []
-    progress = VerifyProgress(output.append, call_count=lambda: 3)
-
-    for stage, detail in (
-        ("sdk_check", "Provider mode: local"),
-        ("agent_start", "ContainerAgentAdapter"),
-        ("case_generation", "run=offline_abcdef0123456789extra"),
-        ("benchmark_execution", "Judge: pass"),
-    ):
-        progress(BenchmarkProgress(stage, "started"))  # type: ignore[arg-type]
-        progress(BenchmarkProgress(stage, "succeeded", detail=detail))  # type: ignore[arg-type]
-    progress.close()
-
-    plain = [_plain(line).strip() for line in output]
-    assert len(plain) == 4, plain
-    assert plain[0].startswith("✓  configuration")
-    assert plain[0].endswith("local providers")
-    assert plain[1].endswith("ContainerAgentAdapter")
-    assert "offline_abcdef" in plain[2]
-    assert plain[3].endswith("3 model calls")
-    assert not progress.failed
-
-
-def test_a_long_stage_detail_is_cut_so_the_stage_column_stays_scannable() -> None:
-    output: list[str] = []
-    progress = VerifyProgress(output.append)
-    reason = (
-        "AgentInvocationError: Agent 'gpt-researcher' failed for SDK Input "
-        "'offline-probe-1': DockerSessionError: AttributeError: 'str' object "
-        "has no attribute 'get'"
-    )
-
-    progress(BenchmarkProgress("benchmark_execution", "failed", detail=reason))  # type: ignore[arg-type]
-
-    line = _plain(output[0])
-    assert len(line) <= 80, len(line)
-    assert line.rstrip().endswith("…")
-
-
-def test_failed_stage_is_marked_and_remembered() -> None:
-    output: list[str] = []
-    progress = VerifyProgress(output.append)
-
-    progress(BenchmarkProgress("agent_start", "started"))  # type: ignore[arg-type]
-    progress(BenchmarkProgress("agent_start", "failed", detail="DockerRuntimeError"))  # type: ignore[arg-type]
-
-    assert _plain(output[0]).strip().startswith("✗  agent start")
-    assert "DockerRuntimeError" in _plain(output[0])
-    assert progress.failed
+# --- captured traffic --------------------------------------------------------
 
 
 def test_a_long_request_still_yields_a_readable_preview() -> None:
@@ -463,12 +495,3 @@ def test_terminal_trace_keeps_a_source_that_was_rewritten() -> None:
     )
 
     assert "source=api.openai.com/v1/chat/completions" in output[0]
-
-
-def test_single_model_call_is_not_pluralized() -> None:
-    output: list[str] = []
-    progress = VerifyProgress(output.append, call_count=lambda: 1)
-
-    progress(BenchmarkProgress("benchmark_execution", "succeeded", detail="Judge: pass"))  # type: ignore[arg-type]
-
-    assert _plain(output[0]).endswith("1 model call")

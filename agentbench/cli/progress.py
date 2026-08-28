@@ -6,6 +6,7 @@ import sys
 from builtins import print as builtin_print
 from collections.abc import Callable
 from threading import Event, Lock, Thread
+from typing import Protocol
 
 from agentbench.harness.progress import BenchmarkProgress
 
@@ -14,6 +15,21 @@ from .constants import ANSI_GREEN, ANSI_RED, ANSI_RESET, ANSI_YELLOW
 
 DOT_FRAMES = (".  ", ".. ", "...")
 ANIMATION_INTERVAL_SECONDS = 0.35
+
+
+class StageReporter(Protocol):
+    """A renderer for stages a command opens and closes itself.
+
+    Stated separately from the Harness progress callback because a command can
+    have stages the Harness knows nothing about, and both have to appear in one
+    uninterrupted column.
+    """
+
+    def start_stage(self, label: str) -> None:
+        ...
+
+    def finish_stage(self, ok: bool, detail: str | None = None) -> None:
+        ...
 
 
 class ProgressPrinter:
@@ -45,17 +61,26 @@ class ProgressPrinter:
         if event.stage == "case_generation" and event.detail:
             self._provider_mode = event.detail
         if event.status == "started":
-            self._start_stage(_stage_label(event, self._provider_mode))
+            self.start_stage(_stage_label(event, self._provider_mode))
             return
+        self.finish_stage(event.status == "succeeded", event.detail)
 
-        status = "OK" if event.status == "succeeded" else "FAILED"
-        color = ANSI_GREEN if event.status == "succeeded" else ANSI_RED
-        suffix = f" | {event.detail}" if event.detail else ""
+    def finish_stage(self, ok: bool, detail: str | None = None) -> None:
+        """Close the open stage line, so a caller can drive its own stages.
+
+        Commands whose stages are not all Harness events still have to look like
+        one run, so the OK/FAILED wording lives here rather than being rebuilt by
+        every caller that opens a stage of its own.
+        """
+
+        status = "OK" if ok else "FAILED"
+        color = ANSI_GREEN if ok else ANSI_RED
+        suffix = f" | {detail}" if detail else ""
         self._finish_stage(f"{color}{status}{ANSI_RESET}{suffix}")
 
-    def _start_stage(self, label: str) -> None:
-        if self._llm_activity is not None:
-            self._llm_activity.start_stage(label)
+    def start_stage(self, label: str) -> None:
+        if self._panel_owns_terminal():
+            self._llm_activity.start_stage(label)  # type: ignore[union-attr]
             return
         if not self._live_updates:
             self._output_fn(label)
@@ -72,8 +97,8 @@ class ProgressPrinter:
         self._animation_thread.start()
 
     def _finish_stage(self, status: str) -> None:
-        if self._llm_activity is not None:
-            self._llm_activity.finish_stage(status)
+        if self._panel_owns_terminal():
+            self._llm_activity.finish_stage(status)  # type: ignore[union-attr]
             return
         if not self._live_updates:
             self._output_fn(f"  {status}")
@@ -86,6 +111,16 @@ class ProgressPrinter:
             sys.stdout.write(f"\r\033[2K  {final_label} {status}\n")
             sys.stdout.flush()
         self._active_label = None
+
+    def _panel_owns_terminal(self) -> bool:
+        """Whether the live panel will render the stage line itself.
+
+        A panel that has been silenced — because the command prints its own
+        sectioned report and would otherwise duplicate every call — still exists
+        as a trace sink, but it cannot be the one to draw the stage line.
+        """
+
+        return self._llm_activity is not None and self._llm_activity.live
 
     def _animate_stage(self, label: str) -> None:
         base_label = _base_stage_label(label)
@@ -113,7 +148,6 @@ class ProgressPrinter:
 
         if self._llm_activity is not None:
             self._llm_activity.close()
-            return
         self._stop_active_animation()
 
 

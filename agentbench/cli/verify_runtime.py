@@ -1,10 +1,13 @@
-"""Assemble the benchmark runner that `verify` drives.
+"""Assemble the two runtime stacks that `verify` drives.
 
-Two axes vary here and nothing else does. The Case and Judge Providers are always
-local, which is what keeps ``DEFUZEX_API_KEY`` out of every verification. The model
-replies are either synthesized inside the interceptor with egress blocked, or
-fetched from a real provider with egress open. Everything downstream — the SDK Run,
-the handshake, the trace sinks, the call recorder — is identical either way.
+Verification runs in one direction, and the two halves need different machinery.
+Preflight needs nothing but Docker: model replies are synthesized inside the
+interceptor with egress blocked, so an Agent stays checkable before any
+credential — or the DefuzeX SDK itself — exists on the host. The graded benchmark
+that follows needs both, and reaches a real provider with egress open.
+
+Both halves observe the same Agent through one shared set of trace sinks, so the
+final report accounts for every model call either half made.
 """
 
 from __future__ import annotations
@@ -16,11 +19,7 @@ from typing import Literal, get_args
 
 from agentbench.cli.TerminalUI.call_log import CallRecord, CallRecorder
 from agentbench.harness import AgentRunner, BenchmarkRunner, SuiteRunner
-from agentbench.harness.offline import (
-    DEFAULT_PROBE_TEXT,
-    OfflineSecretResolver,
-    OfflineSuiteRunner,
-)
+from agentbench.harness.offline import DEFAULT_PROBE_TEXT, OfflineSecretResolver
 from agentbench.runtime import RuntimeFactory
 from agentbench.runtime.docker import DockerRuntime
 from agentbench.runtime.docker.runtime import EgressMode
@@ -29,7 +28,6 @@ from agentbench.runtime.interception import (
     DEFAULT_DEEPSEEK_MODEL,
     DEFAULT_TRACE_MAX_BYTES,
     DeepSeekProvider,
-    InterceptionConfigurationError,
     InterceptionTraceState,
     ModelTargetConfig,
     ModelTargetProvider,
@@ -46,36 +44,54 @@ OFFLINE_MODEL = "offline-verify-model"
 OFFLINE_UPSTREAM_KEY_ENV = "DEFUZEX_OFFLINE_UPSTREAM_KEY"
 OFFLINE_UPSTREAM_KEY_VALUE = "offline-verify-no-upstream"
 
-ModelSource = Literal["offline", "deepseek"]
-MODEL_SOURCES: tuple[ModelSource, ...] = get_args(ModelSource)
-
-OFFLINE_SOURCE: ModelSource = "offline"
-LIVE_SOURCE: ModelSource = "deepseek"
-
-VerifyMode = Literal["startup", "benchmark"]
-VERIFY_MODES: tuple[VerifyMode, ...] = get_args(VerifyMode)
-
 TraceMode = Literal["off", "terminal"]
 TRACE_MODES: tuple[TraceMode, ...] = get_args(TraceMode)
 
-STARTUP_MODE: VerifyMode = "startup"
-BENCHMARK_MODE: VerifyMode = "benchmark"
+# One probe answers the preflight question. One generated Case does not answer
+# the behavior question, because a single Input cannot cover a requirement.
+DEFAULT_PROBE_COUNT = 1
+DEFAULT_INPUT_COUNT = 3
+
+
+@dataclass(frozen=True, slots=True)
+class VerifyOptions:
+    """What to verify and how, apart from where the report goes.
+
+    These travel together because ``verify`` reads almost none of them: it hands
+    them to :func:`build_verify_runtime`. Spelling them out on both meant every
+    new option had to be added in three places — two signatures and the call
+    between them — and a missed one silently kept its default.
+    """
+
+    probe_count: int = DEFAULT_PROBE_COUNT
+    input_count: int = DEFAULT_INPUT_COUNT
+    probe_text: str = DEFAULT_PROBE_TEXT
+    # The model the Agent itself talks to during the graded benchmark. Preflight
+    # never uses it: its replies come from the interceptor.
+    model: str | None = None
+    # The model that writes the Case and grades the Run, which is a different
+    # question from the model the Agent talked to.
+    provider_model: str | None = None
+    preflight_only: bool = False
+    llm_trace: TraceMode = "off"
+    llm_trace_max_bytes: int = DEFAULT_TRACE_MAX_BYTES
 
 
 @dataclass(frozen=True)
 class VerifyRuntime:
-    """The runner plus the handles the CLI needs to report on a verification."""
+    """Shared observation handles, plus the stack each half of verify needs.
 
-    runner: SuiteRunner
+    The stacks are built on demand rather than up front: the benchmark one
+    resolves a live provider, and that must not be attempted until preflight has
+    passed and the provider check has confirmed a credential exists.
+    """
+
+    options: VerifyOptions
     trace_state: InterceptionTraceState
-    secret_resolver: OfflineSecretResolver
     call_recorder: CallRecorder
-    model_source: ModelSource = OFFLINE_SOURCE
-    model: str = OFFLINE_MODEL
-    mode: VerifyMode = STARTUP_MODE
-    # The model that wrote the Case and graded the Run, which is a different
-    # question from the model the Agent itself talked to.
-    provider_model: str | None = None
+    secret_resolver: OfflineSecretResolver
+    trace_sink: TraceSink
+    environ: Mapping[str, str]
 
     @property
     def captured_pair_count(self) -> int:
@@ -93,29 +109,55 @@ class VerifyRuntime:
     def substituted_secrets(self) -> tuple[str, ...]:
         return self.secret_resolver.substituted
 
-    @property
-    def offline(self) -> bool:
-        return self.model_source == OFFLINE_SOURCE
+    def preflight_runner(self) -> AgentRunner:
+        """The stack preflight drives: synthesized replies, egress blocked.
 
+        No Providers and no SDK Run appear here. Preflight invokes the adapter
+        directly, which is what lets it answer for the Agent on a host where the
+        DefuzeX SDK is not installed at all.
+        """
 
-@dataclass(frozen=True, slots=True)
-class VerifyOptions:
-    """What to verify and how, apart from where the report goes.
+        return AgentRunner(
+            runtime_factory=self._runtime_factory(
+                StaticModelTargetProvider(_offline_target()), "blocked"
+            )
+        )
 
-    These travel together because ``verify`` reads almost none of them: it hands
-    them to :func:`build_verify_runtime`. Spelling them out on both meant every
-    new option had to be added in three places — two signatures and the call
-    between them — and a missed one silently kept its default.
-    """
+    def benchmark_suite_runner(self, chat: object) -> SuiteRunner:
+        """The graded stack: a live provider, egress open, local Case and Judge.
 
-    input_count: int = 1
-    probe_text: str = DEFAULT_PROBE_TEXT
-    mode: VerifyMode = STARTUP_MODE
-    model_source: ModelSource = OFFLINE_SOURCE
-    model: str | None = None
-    provider_model: str | None = None
-    llm_trace: TraceMode = "off"
-    llm_trace_max_bytes: int = DEFAULT_TRACE_MAX_BYTES
+        Passing both Providers is what selects the SDK's local mode, which never
+        reads ``DEFUZEX_API_KEY`` and never opens a Backend connection.
+        """
+
+        # Imported here because it pulls in the DefuzeX SDK, which preflight and
+        # every Agent-only caller must keep out of their import graph.
+        from agentbench.harness.local import LocalBenchmarkSuiteRunner
+
+        return LocalBenchmarkSuiteRunner(
+            benchmark_runner=BenchmarkRunner(
+                agent_runner=AgentRunner(
+                    runtime_factory=self._runtime_factory(
+                        DeepSeekProvider(self.options.model), "open"
+                    )
+                )
+            ),
+            model=chat,  # type: ignore[arg-type]
+            max_inputs=self.options.input_count,
+        )
+
+    def _runtime_factory(
+        self, model_provider: ModelTargetProvider, egress: EgressMode
+    ) -> RuntimeFactory:
+        return RuntimeFactory(
+            docker_builder=_VerifyDockerBuilder(
+                secret_resolver=self.secret_resolver,
+                model_provider=model_provider,
+                egress=egress,
+                trace_sink=self.trace_sink,
+                trace_max_bytes=self.options.llm_trace_max_bytes,
+            )
+        )
 
 
 def build_verify_runtime(
@@ -125,7 +167,7 @@ def build_verify_runtime(
     activity_sink: TraceSink | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> VerifyRuntime:
-    """Wire a runner that needs no DefuzeX credentials, online or offline.
+    """Wire the observation handles both halves of a verification share.
 
     Options are validated here rather than in ``VerifyOptions`` so that a bad
     combination still surfaces through ``verify``'s error path as a report, not
@@ -133,22 +175,25 @@ def build_verify_runtime(
     """
 
     options = options or VerifyOptions()
-    _validate(options)
+    if options.llm_trace not in TRACE_MODES:
+        raise ValueError(f"Unsupported LLM trace mode: {options.llm_trace!r}")
+
     values = os.environ if environ is None else environ
-    provider, egress, overlay, label = _model_plan(
-        options.model_source, options.model, values
-    )
+    # The offline target never contacts a provider, so its credential is
+    # synthetic. Seeding it here keeps it out of the resolver's
+    # substituted-secret report, which is reserved for genuinely missing Agent
+    # configuration.
+    overlay = {OFFLINE_UPSTREAM_KEY_ENV: OFFLINE_UPSTREAM_KEY_VALUE}
 
     # Counting pairs here is independent of the runtime's own required-trace gate,
     # so the CLI can report how much model traffic verification actually observed.
     trace_state = InterceptionTraceState()
     call_recorder = CallRecorder()
-    secret_resolver = OfflineSecretResolver({**values, **overlay})
-    benchmark_runner = _benchmark_runner(
-        options,
-        secret_resolver=secret_resolver,
-        model_provider=provider,
-        egress=egress,
+    return VerifyRuntime(
+        options=options,
+        trace_state=trace_state,
+        call_recorder=call_recorder,
+        secret_resolver=OfflineSecretResolver({**values, **overlay}),
         trace_sink=_CompositeTraceSink(
             _trace_sinks(
                 trace_state,
@@ -158,154 +203,16 @@ def build_verify_runtime(
                 llm_trace=options.llm_trace,
             )
         ),
-    )
-    runner, provider_label = _suite_runner(
-        options.mode,
-        benchmark_runner=benchmark_runner,
-        max_inputs=options.input_count,
-        probe_text=options.probe_text,
-        provider_model=options.provider_model,
         environ=values,
     )
-    return VerifyRuntime(
-        runner=runner,
-        trace_state=trace_state,
-        secret_resolver=secret_resolver,
-        call_recorder=call_recorder,
-        model_source=options.model_source,
-        model=label,
-        mode=options.mode,
-        provider_model=provider_label,
-    )
 
 
-def _validate(options: VerifyOptions) -> None:
-    """Reject an unusable combination before anything is built."""
-
-    if options.llm_trace not in TRACE_MODES:
-        raise ValueError(f"Unsupported LLM trace mode: {options.llm_trace!r}")
-    if options.model_source not in MODEL_SOURCES:
-        raise ValueError(f"Unsupported model source: {options.model_source!r}")
-    if options.mode not in VERIFY_MODES:
-        raise ValueError(f"Unsupported verify mode: {options.mode!r}")
-    if options.mode == BENCHMARK_MODE and options.model_source == OFFLINE_SOURCE:
-        raise ValueError(
-            "Benchmark mode grades what the Agent actually said, and the offline "
-            "source answers every request with the same synthetic text. Pass "
-            f"--model-source {LIVE_SOURCE}, or use --mode {STARTUP_MODE}."
-        )
-
-
-def _benchmark_runner(
-    options: VerifyOptions,
-    *,
-    secret_resolver: OfflineSecretResolver,
-    model_provider: ModelTargetProvider,
-    egress: EgressMode,
-    trace_sink: TraceSink,
-) -> BenchmarkRunner:
-    """The Agent-facing half of the stack: one container, one interceptor.
-
-    No Provider arguments are passed here. The SDK itself owns the Run; only the
-    Provider pair is local, which is what keeps the whole path free of DefuzeX
-    credentials and networking.
-    """
-
-    return BenchmarkRunner(
-        agent_runner=AgentRunner(
-            runtime_factory=RuntimeFactory(
-                docker_builder=_VerifyDockerBuilder(
-                    secret_resolver=secret_resolver,
-                    model_provider=model_provider,
-                    egress=egress,
-                    trace_sink=trace_sink,
-                    trace_max_bytes=options.llm_trace_max_bytes,
-                )
-            )
-        )
-    )
-
-
-def _suite_runner(
-    mode: VerifyMode,
-    *,
-    benchmark_runner: BenchmarkRunner,
-    max_inputs: int,
-    probe_text: str,
-    provider_model: str | None,
-    environ: Mapping[str, str],
-) -> tuple[SuiteRunner, str | None]:
-    """Pick which pair of Providers drives the Run.
-
-    Both branches leave the shared execution path untouched; only the two
-    Provider ports differ, which is what makes a local Run comparable to an
-    official one.
-    """
-
-    if mode == STARTUP_MODE:
-        return (
-            OfflineSuiteRunner(
-                benchmark_runner=benchmark_runner,
-                max_inputs=max_inputs,
-                probe_text=probe_text,
-            ),
-            None,
-        )
-
-    # Imported here because it pulls in the DefuzeX SDK, which the startup path
-    # and every Agent-only caller must keep out of their import graph.
-    from agentbench.harness.local import ChatModel, LocalBenchmarkSuiteRunner
-
-    chat = ChatModel.from_environment(environ, model=provider_model)
-    return (
-        LocalBenchmarkSuiteRunner(
-            benchmark_runner=benchmark_runner,
-            model=chat,
-            max_inputs=max_inputs,
-        ),
-        chat.model,
-    )
-
-
-def _model_plan(
-    model_source: ModelSource,
-    model: str | None,
-    environ: Mapping[str, str],
-) -> tuple[ModelTargetProvider, EgressMode, Mapping[str, str], str]:
-    """Choose the target, the egress policy, and any synthetic credential."""
-
-    if model_source == OFFLINE_SOURCE:
-        target = _offline_target(model)
-        # The offline target never contacts a provider, so its credential is
-        # synthetic. Seeding it here keeps it out of the resolver's
-        # substituted-secret report, which is reserved for genuinely missing
-        # Agent configuration.
-        overlay = {OFFLINE_UPSTREAM_KEY_ENV: OFFLINE_UPSTREAM_KEY_VALUE}
-        return StaticModelTargetProvider(target), "blocked", overlay, target.model
-
-    provider = DeepSeekProvider(model)
-    # Resolving now turns a missing key or a bad model into an error before an
-    # image is built, instead of a 401 inside the container minutes later.
-    resolved = provider.resolve(environ)
-    _require_credential(resolved.credential_env, environ)
-    return provider, "open", {}, resolved.model
-
-
-def _require_credential(name: str, environ: Mapping[str, str]) -> None:
-    if environ.get(name, "").strip():
-        return
-    raise InterceptionConfigurationError(
-        f"A live model run needs {name}. Set it in the environment or .env, or "
-        "drop --model-source to verify against the offline mock."
-    )
-
-
-def _offline_target(model: str | None) -> ModelTargetConfig:
+def _offline_target() -> ModelTargetConfig:
     return ModelTargetConfig(
         provider_id=OFFLINE_PROVIDER_ID,
         target_plugin=OFFLINE_TARGET_PLUGIN,
         base_url=OFFLINE_BASE_URL,
-        model=(model or OFFLINE_MODEL).strip() or OFFLINE_MODEL,
+        model=OFFLINE_MODEL,
         credential_env=OFFLINE_UPSTREAM_KEY_ENV,
     )
 
@@ -370,19 +277,14 @@ class _CompositeTraceSink:
 
 
 __all__ = [
-    "BENCHMARK_MODE",
     "DEEPSEEK_API_KEY_ENV",
     "DEFAULT_DEEPSEEK_MODEL",
-    "LIVE_SOURCE",
-    "MODEL_SOURCES",
-    "OFFLINE_SOURCE",
+    "DEFAULT_INPUT_COUNT",
+    "DEFAULT_PROBE_COUNT",
+    "OFFLINE_MODEL",
     "OFFLINE_TARGET_PLUGIN",
     "OFFLINE_UPSTREAM_KEY_ENV",
-    "STARTUP_MODE",
     "TRACE_MODES",
-    "VERIFY_MODES",
-    "ModelSource",
-    "VerifyMode",
     "VerifyOptions",
     "VerifyRuntime",
     "build_verify_runtime",

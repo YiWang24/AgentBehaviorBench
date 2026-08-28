@@ -1,43 +1,115 @@
+"""`verify` end to end: the three phases, and where each one stops."""
+
 from __future__ import annotations
 
 import json
+import sys
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 
-import pytest
-
+from agentbench.adapter import AdapterInvocation
 from agentbench.cli.features.verify import verify
 from agentbench.cli.main import cli
 from agentbench.cli.presentation import ANSI_PATTERN
-from agentbench.cli.TerminalUI import LLMActivity
-from agentbench.cli.TerminalUI.call_log import CallRecorder
-from agentbench.cli.verify_runtime import (
-    OFFLINE_TARGET_PLUGIN,
-    OFFLINE_UPSTREAM_KEY_ENV,
-    VerifyOptions,
-    VerifyRuntime,
-    build_verify_runtime,
+from agentbench.cli.TerminalUI.call_log import CallRecord, CallRecorder
+from agentbench.cli.verify_report import (
+    PROVIDERS_READY,
+    PROVIDERS_SKIPPED,
+    PROVIDERS_UNAVAILABLE,
 )
+from agentbench.cli.verify_runtime import VerifyOptions
 from agentbench.harness import (
     AgentRegistration,
     BenchmarkSuiteResult,
+    RunningAgent,
     SuiteAgentResult,
     SuiteConfigurationError,
 )
-from agentbench.harness.offline import (
-    OfflineSecretResolver,
-    StartupCaseProvider,
-    StartupJudgeProvider,
-)
-from agentbench.harness.runner.benchmark_runner import BenchmarkRunner
-from agentbench.runtime.interception import (
-    InterceptionTraceState,
-    TerminalTraceSink,
-    TraceEvent,
-)
+from agentbench.harness.offline import OfflineSecretResolver
+from agentbench.runtime.interception import InterceptionTraceState, TraceEvent
 from tests.test_cli import FakeSuiteRunner
 
 DOCKER_AGENT_ID = "langgraph-customer-support-agent"
 IN_PROCESS_AGENT_ID = "langgraph-new-project"
+
+LIVE_ENV = {"DEEPSEEK_API_KEY": "sk-not-a-real-key"}
+
+
+# --- test doubles ------------------------------------------------------------
+
+
+class _FakeAdapter:
+    """An Agent that answers every probe, unless told to misbehave."""
+
+    def __init__(
+        self, *, outputs: list[object] | None = None, error: Exception | None = None
+    ) -> None:
+        self._outputs = outputs
+        self._error = error
+        self.is_loaded = True
+        self.invocations: list[object] = []
+
+    def load(self) -> "_FakeAdapter":
+        return self
+
+    def invoke(self, value: object, *, run_config: object | None = None):
+        self.invocations.append(value)
+        if self._error is not None:
+            raise self._error
+        output = self._outputs.pop(0) if self._outputs else "a reply"
+        return AdapterInvocation(output=output, raw_output=output)
+
+    def close(self) -> None:
+        self.is_loaded = False
+
+
+class _FakeAgentRunner:
+    def __init__(
+        self, adapter: _FakeAdapter | None = None, error: Exception | None = None
+    ) -> None:
+        self.adapter = adapter or _FakeAdapter()
+        self.error = error
+        self.starts = 0
+
+    def start(self, agent: AgentRegistration) -> RunningAgent:
+        self.starts += 1
+        if self.error is not None:
+            raise self.error
+        return RunningAgent(registration=agent, adapter=self.adapter)  # type: ignore[arg-type]
+
+
+@dataclass
+class _FakeRuntime:
+    """The two stacks and the shared observation handles, without Docker."""
+
+    options: VerifyOptions
+    environ: Mapping[str, str]
+    trace_state: InterceptionTraceState
+    agent_runner: _FakeAgentRunner
+    secret_resolver: OfflineSecretResolver
+    call_recorder: CallRecorder = field(default_factory=CallRecorder)
+    suite: object | None = None
+    suites_built: int = 0
+
+    @property
+    def captured_pair_count(self) -> int:
+        return self.trace_state.checkpoint()
+
+    @property
+    def calls(self) -> tuple[CallRecord, ...]:
+        return tuple(self.call_recorder.records)
+
+    @property
+    def substituted_secrets(self) -> tuple[str, ...]:
+        return self.secret_resolver.substituted
+
+    def preflight_runner(self) -> _FakeAgentRunner:
+        return self.agent_runner
+
+    def benchmark_suite_runner(self, chat: object) -> object:
+        self.suites_built += 1
+        return self.suite or FakeSuiteRunner()
 
 
 def _trace_state(pairs: int) -> InterceptionTraceState:
@@ -49,17 +121,23 @@ def _trace_state(pairs: int) -> InterceptionTraceState:
     return state
 
 
-def _offline(
+def _runtime(
     *,
+    options: VerifyOptions | None = None,
     pairs: int = 1,
-    runner: object | None = None,
+    adapter: _FakeAdapter | None = None,
+    start_error: Exception | None = None,
+    environ: Mapping[str, str] | None = None,
+    suite: object | None = None,
     resolver: OfflineSecretResolver | None = None,
-) -> VerifyRuntime:
-    return VerifyRuntime(
-        runner=runner or FakeSuiteRunner(),  # type: ignore[arg-type]
+) -> _FakeRuntime:
+    return _FakeRuntime(
+        options=options or VerifyOptions(),
+        environ=LIVE_ENV if environ is None else environ,
         trace_state=_trace_state(pairs),
+        agent_runner=_FakeAgentRunner(adapter, start_error),
         secret_resolver=resolver or OfflineSecretResolver({}),
-        call_recorder=CallRecorder(),
+        suite=suite,
     )
 
 
@@ -71,14 +149,21 @@ def _plain(text: str) -> str:
     return ANSI_PATTERN.sub("", text).strip()
 
 
+VERDICT_BADGES = {"PASS", "PARTIAL", "FAIL"}
+
+
 def _verdict_line(output: list[str]) -> str:
-    """The PASS/FAIL verdict, rejoined when a long reason wrapped across lines."""
+    """The verdict, rejoined when a long reason wrapped across lines.
+
+    Matched on the whole badge, not a prefix: a failed stage line reads
+    ``FAILED | ...`` and would otherwise be mistaken for the verdict.
+    """
 
     collected: list[str] = []
     for line in output:
         text = _plain(line)
         if not collected:
-            if text.startswith(("PASS", "FAIL")):
+            if text.split(" ")[0] in VERDICT_BADGES:
                 collected.append(text)
             continue
         if not text or text.startswith("log "):
@@ -93,50 +178,70 @@ def _json_report(output: list[str]) -> dict:
     return json.loads("\n".join(output))
 
 
+def _run(repo_root: Path, runtime: _FakeRuntime, **kwargs):  # type: ignore[no-untyped-def]
+    output: list[str] = []
+    exit_code = verify(
+        DOCKER_AGENT_ID,
+        options=runtime.options,
+        registry_path=_registry_path(repo_root),
+        output_fn=output.append,
+        runtime=runtime,  # type: ignore[arg-type]
+        **kwargs,
+    )
+    return exit_code, output
+
+
 # --- argument dispatch -------------------------------------------------------
 
 
-def test_cli_dispatches_verify_with_defaults(monkeypatch) -> None:
-    calls: list[tuple[str, dict[str, object]]] = []
+def _dispatched(monkeypatch) -> list[dict[str, object]]:  # type: ignore[no-untyped-def]
+    """Replace `verify` with a recorder, and return the calls it collects."""
 
-    def fake_verify(agent_id, **kwargs):  # type: ignore[no-untyped-def]
-        calls.append((agent_id, kwargs))
+    calls: list[dict[str, object]] = []
+
+    def record(agent_id: str, **kwargs: object) -> int:
+        calls.append({"agent_id": agent_id, **kwargs})
         return 0
 
-    monkeypatch.setattr("agentbench.cli.features.verify.verify", fake_verify)
+    monkeypatch.setattr("agentbench.cli.features.verify.verify", record)
+    return calls
+
+
+def test_cli_dispatches_verify_with_defaults(monkeypatch) -> None:
+    calls = _dispatched(monkeypatch)
 
     assert cli(["verify", "test-agent"]) == 0
-    assert calls == [
-        (
-            "test-agent",
-            {
-                "options": VerifyOptions(input_count=1),
-                "keep_artifacts": False,
-                "output_path": None,
-                "as_json": False,
-            },
-        )
-    ]
+    assert calls[0]["agent_id"] == "test-agent"
+    assert calls[0]["options"] == VerifyOptions(probe_count=1, input_count=3)
+    assert calls[0]["output_path"] is None
+    assert calls[0]["as_json"] is False
 
 
-def test_cli_dispatches_verify_options(monkeypatch) -> None:
-    calls: list[tuple[str, dict[str, object]]] = []
+def test_cli_separates_preflight_probes_from_benchmark_inputs(monkeypatch) -> None:
+    """The two counts answer different questions and must not share a flag."""
 
-    def fake_verify(agent_id, **kwargs):  # type: ignore[no-untyped-def]
-        calls.append((agent_id, kwargs))
-        return 3
+    calls = _dispatched(monkeypatch)
 
-    monkeypatch.setattr("agentbench.cli.features.verify.verify", fake_verify)
+    cli(["verify", "test-agent", "--probes", "4", "--inputs", "7"])
 
-    exit_code = cli(
+    options = calls[0]["options"]
+    assert (options.probe_count, options.input_count) == (4, 7)
+
+
+def test_cli_dispatches_the_remaining_options(monkeypatch) -> None:
+    calls = _dispatched(monkeypatch)
+
+    cli(
         [
             "verify",
             "test-agent",
             "--input",
             "ping",
-            "--inputs",
-            "2",
-            "--keep-artifacts",
+            "--preflight-only",
+            "--model",
+            "deepseek-reasoner",
+            "--provider-model",
+            "deepseek-chat",
             "--llm-trace",
             "terminal",
             "--llm-trace-max-bytes",
@@ -144,97 +249,29 @@ def test_cli_dispatches_verify_options(monkeypatch) -> None:
         ]
     )
 
-    assert exit_code == 3
-    assert calls == [
-        (
-            "test-agent",
-            {
-                "options": VerifyOptions(
-                    input_count=2,
-                    probe_text="ping",
-                    llm_trace="terminal",
-                    llm_trace_max_bytes=4096,
-                ),
-                "keep_artifacts": True,
-                "output_path": None,
-                "as_json": False,
-            },
-        )
-    ]
-
-
-def test_cli_dispatches_a_live_model_source(monkeypatch) -> None:
-    calls: list[dict[str, object]] = []
-
-    monkeypatch.setattr(
-        "agentbench.cli.features.verify.verify",
-        lambda agent_id, **kwargs: calls.append(kwargs) or 0,  # type: ignore[func-returns-value]
+    assert calls[0]["options"] == VerifyOptions(
+        probe_count=1,
+        input_count=3,
+        probe_text="ping",
+        model="deepseek-reasoner",
+        provider_model="deepseek-chat",
+        preflight_only=True,
+        llm_trace="terminal",
+        llm_trace_max_bytes=4096,
     )
-
-    cli(
-        [
-            "verify",
-            "test-agent",
-            "--model-source",
-            "deepseek",
-            "--model",
-            "deepseek-reasoner",
-        ]
-    )
-
-    options = calls[0]["options"]
-    assert options.model_source == "deepseek"
-    assert options.model == "deepseek-reasoner"
-
-
-def test_cli_defaults_the_model_source_to_offline(monkeypatch) -> None:
-    calls: list[dict[str, object]] = []
-
-    monkeypatch.setattr(
-        "agentbench.cli.features.verify.verify",
-        lambda agent_id, **kwargs: calls.append(kwargs) or 0,  # type: ignore[func-returns-value]
-    )
-
-    cli(["verify", "test-agent"])
-
-    assert calls[0]["options"].model_source == "offline"
-
-
-def test_a_misconfigured_model_source_is_reported_as_an_error(
-    monkeypatch, repo_root: Path
-) -> None:
-    """A missing provider key is the caller's mistake, not a verdict on the Agent."""
-
-    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-    output: list[str] = []
-
-    exit_code = verify(
-        DOCKER_AGENT_ID,
-        options=VerifyOptions(model_source="deepseek"),
-        registry_path=_registry_path(repo_root),
-        output_fn=output.append,
-    )
-
-    assert exit_code == 2
-    assert "DEEPSEEK_API_KEY" in output[-1]
 
 
 def test_cli_reads_probe_text_from_a_file(monkeypatch, tmp_path: Path) -> None:
     probe = tmp_path / "probe.txt"
     probe.write_text("from a file", encoding="utf-8")
-    calls: list[dict[str, object]] = []
-
-    monkeypatch.setattr(
-        "agentbench.cli.features.verify.verify",
-        lambda agent_id, **kwargs: calls.append(kwargs) or 0,  # type: ignore[func-returns-value]
-    )
+    calls = _dispatched(monkeypatch)
 
     cli(["verify", "test-agent", "--input", f"@{probe}"])
 
     assert calls[0]["options"].probe_text == "from a file"
 
 
-# --- preflight rejections ----------------------------------------------------
+# --- selection errors --------------------------------------------------------
 
 
 def test_unregistered_agent_is_rejected(repo_root: Path) -> None:
@@ -244,7 +281,7 @@ def test_unregistered_agent_is_rejected(repo_root: Path) -> None:
         "not-a-real-agent",
         registry_path=_registry_path(repo_root),
         output_fn=output.append,
-        offline=_offline(),
+        runtime=_runtime(),  # type: ignore[arg-type]
     )
 
     assert exit_code == 2
@@ -260,69 +297,274 @@ def test_in_process_agent_is_rejected(repo_root: Path) -> None:
         IN_PROCESS_AGENT_ID,
         registry_path=_registry_path(repo_root),
         output_fn=output.append,
-        offline=_offline(),
+        runtime=_runtime(),  # type: ignore[arg-type]
     )
 
     assert exit_code == 2
     assert "Docker runtime" in output[-1]
 
 
-def test_zero_inputs_is_rejected(repo_root: Path) -> None:
-    output: list[str] = []
+def test_zero_probes_is_rejected(repo_root: Path) -> None:
+    exit_code, output = _run(repo_root, _runtime(options=VerifyOptions(probe_count=0)))
 
-    exit_code = verify(
-        DOCKER_AGENT_ID,
-        options=VerifyOptions(input_count=0),
-        registry_path=_registry_path(repo_root),
-        output_fn=output.append,
-        offline=_offline(),
-    )
+    assert exit_code == 2
+    assert "--probes" in output[-1]
+
+
+def test_zero_inputs_is_rejected(repo_root: Path) -> None:
+    exit_code, output = _run(repo_root, _runtime(options=VerifyOptions(input_count=0)))
 
     assert exit_code == 2
     assert "--inputs" in output[-1]
 
 
-# --- verdicts ----------------------------------------------------------------
+# --- preflight ---------------------------------------------------------------
 
 
-def test_verification_passes_when_the_agent_runs_and_traffic_is_captured(
+def test_preflight_probes_the_agent_the_requested_number_of_times(
     repo_root: Path,
 ) -> None:
-    output: list[str] = []
-
-    exit_code = verify(
-        DOCKER_AGENT_ID,
-        registry_path=_registry_path(repo_root),
-        output_fn=output.append,
-        offline=_offline(pairs=2),
+    adapter = _FakeAdapter()
+    runtime = _runtime(
+        options=VerifyOptions(probe_count=3, probe_text="ping", preflight_only=True),
+        adapter=adapter,
     )
+
+    _run(repo_root, runtime)
+
+    assert adapter.invocations == ["ping", "ping", "ping"]
+
+
+def test_preflight_never_touches_the_sdk_or_the_benchmark_stack(
+    repo_root: Path,
+) -> None:
+    """A missing SDK must not stop an Agent from being checked."""
+
+    runtime = _runtime(options=VerifyOptions(preflight_only=True))
+
+    exit_code, output = _run(repo_root, runtime)
+
+    assert exit_code == 0
+    assert runtime.suites_built == 0
+    assert not any("PROVIDER CHECK" in _plain(line) for line in output)
+
+
+def test_a_preflight_only_pass_reports_probes_rather_than_cases(
+    repo_root: Path,
+) -> None:
+    options = VerifyOptions(probe_count=2, preflight_only=True)
+    runtime = _runtime(options=options, pairs=2)
+
+    exit_code, output = _run(repo_root, runtime)
 
     assert exit_code == 0
     verdict = _verdict_line(output)
-    assert verdict.startswith("PASS")
-    assert "1/1 cases" in verdict
-    assert "2 model request/response pairs captured" in verdict
+    assert "preflight only" in verdict
+    assert "2/2 probes answered" in verdict
 
 
-def test_verification_fails_when_no_model_call_is_captured(repo_root: Path) -> None:
-    output: list[str] = []
+def test_an_agent_that_cannot_start_fails_preflight(repo_root: Path) -> None:
+    runtime = _runtime(start_error=RuntimeError("container exited during startup"))
 
-    exit_code = verify(
-        DOCKER_AGENT_ID,
-        registry_path=_registry_path(repo_root),
-        output_fn=output.append,
-        offline=_offline(pairs=0),
+    exit_code, output = _run(repo_root, runtime)
+
+    assert exit_code == 1
+    verdict = _verdict_line(output)
+    assert verdict.startswith("FAIL")
+    assert "container exited during startup" in verdict
+
+
+def test_an_agent_that_raises_on_a_probe_fails_preflight(repo_root: Path) -> None:
+    runtime = _runtime(adapter=_FakeAdapter(error=RuntimeError("worker died")))
+
+    exit_code, output = _run(repo_root, runtime)
+
+    assert exit_code == 1
+    assert "worker died" in _verdict_line(output)
+
+
+def test_an_empty_answer_fails_preflight(repo_root: Path) -> None:
+    """Only genuinely absent output counts as unanswered."""
+
+    runtime = _runtime(adapter=_FakeAdapter(outputs=["   "]))
+
+    exit_code, output = _run(repo_root, runtime)
+
+    assert exit_code == 1
+    assert "no usable output" in _verdict_line(output)
+
+
+def test_a_falsy_but_present_answer_still_counts(repo_root: Path) -> None:
+    runtime = _runtime(
+        options=VerifyOptions(preflight_only=True), adapter=_FakeAdapter(outputs=[0])
     )
+
+    exit_code, _ = _run(repo_root, runtime)
+
+    assert exit_code == 0
+
+
+def test_uncaptured_model_traffic_fails_preflight(repo_root: Path) -> None:
+    runtime = _runtime(pairs=0)
+
+    exit_code, output = _run(repo_root, runtime)
 
     assert exit_code == 1
     assert "not observable" in _verdict_line(output)
 
 
+def test_substituted_secrets_are_reported(repo_root: Path) -> None:
+    resolver = OfflineSecretResolver({})
+    resolver.require("SOME_AGENT_SECRET")
+    runtime = _runtime(options=VerifyOptions(preflight_only=True), resolver=resolver)
+
+    _, output = _run(repo_root, runtime)
+
+    assert any("SOME_AGENT_SECRET" in line for line in output)
+
+
+# --- provider check ----------------------------------------------------------
+
+
+def test_a_missing_provider_credential_stops_without_failing(repo_root: Path) -> None:
+    """Preflight passed; the gap is in the host, so the Agent is not blamed."""
+
+    runtime = _runtime(environ={})
+
+    exit_code, output = _run(repo_root, runtime)
+
+    assert exit_code == 0
+    assert runtime.suites_built == 0
+    verdict = _verdict_line(output)
+    assert verdict.startswith("PARTIAL")
+    assert "DEEPSEEK_API_KEY" in verdict
+
+
+def test_a_missing_sdk_stops_without_failing(repo_root: Path, monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "defuzex", None)
+    runtime = _runtime()
+
+    exit_code, output = _run(repo_root, runtime)
+
+    assert exit_code == 0
+    assert runtime.suites_built == 0
+    assert "not importable" in _verdict_line(output)
+
+
+def test_a_partial_run_records_why_it_stopped(repo_root: Path) -> None:
+    runtime = _runtime(environ={})
+
+    _, output = _run(repo_root, runtime, as_json=True)
+
+    providers = _json_report(output)["providers"]
+    assert providers["state"] == PROVIDERS_UNAVAILABLE
+    assert "DEEPSEEK_API_KEY" in providers["reason"]
+
+
+def test_a_preflight_only_run_marks_the_provider_check_skipped(
+    repo_root: Path,
+) -> None:
+    runtime = _runtime(options=VerifyOptions(preflight_only=True))
+
+    _, output = _run(repo_root, runtime, as_json=True)
+
+    assert _json_report(output)["providers"]["state"] == PROVIDERS_SKIPPED
+
+
+# --- benchmark ---------------------------------------------------------------
+
+
+def test_a_graded_run_passes_and_names_both_models(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    runtime = _runtime()
+
+    exit_code, output = _run(
+        repo_root, runtime, output_path=tmp_path / "verify.jsonl", as_json=True
+    )
+
+    assert exit_code == 0
+    report = _json_report(output)
+    assert report["verdict"] == "pass"
+    assert report["providers"]["state"] == PROVIDERS_READY
+    assert report["providers"]["agent_model"]
+    assert report["providers"]["provider_model"]
+    assert report["benchmark"]["ran"] is True
+    assert report["benchmark"]["sdk_judge_status"] == "pass"
+
+
+def test_a_non_passing_judgment_fails_verification(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    """The SDK Judge owns the verdict once a real Case has been graded."""
+
+    runtime = _runtime(suite=FakeSuiteRunner(result_status="issue"))
+
+    exit_code, output = _run(repo_root, runtime, output_path=tmp_path / "verify.jsonl")
+
+    assert exit_code == 1
+    verdict = _verdict_line(output)
+    assert verdict.startswith("FAIL")
+    assert "issue" in verdict
+
+
+def test_a_run_that_never_started_fails_verification(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    runtime = _runtime(suite=_FailingSuiteRunner())
+
+    exit_code, output = _run(repo_root, runtime, output_path=tmp_path / "verify.jsonl")
+
+    assert exit_code == 1
+    assert "AgentStartError" in _verdict_line(output)
+
+
+def test_shared_configuration_failure_fails_verification(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    runtime = _runtime(
+        suite=FakeSuiteRunner(error=SuiteConfigurationError("docker unavailable"))
+    )
+
+    exit_code, output = _run(repo_root, runtime, output_path=tmp_path / "verify.jsonl")
+
+    assert exit_code == 1
+    assert _verdict_line(output).startswith("FAIL")
+
+
+def test_a_graded_run_writes_and_reports_its_result_log(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    """The archived Run is worth keeping, so its path has to reach the reader."""
+
+    _, output = _run(repo_root, _runtime(), output_path=tmp_path / "verify.jsonl")
+
+    logged = [_plain(line) for line in output if _plain(line).startswith("log ")]
+    assert len(logged) == 1
+    # The writer suffixes the base path so a rerun never overwrites an archive.
+    path = Path(logged[0].removeprefix("log").strip())
+    assert path.parent == tmp_path
+    lines = path.read_text(encoding="utf-8").splitlines()
+    events = [json.loads(line) for line in lines]
+    assert events[-1]["event"] == "suite_completed"
+
+
+def test_the_benchmark_honours_the_registry_case_count(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    """A graded Run covers what the Registry declared, exactly as certify does."""
+
+    suite = FakeSuiteRunner()
+    _run(repo_root, _runtime(suite=suite), output_path=tmp_path / "verify.jsonl")
+
+    selected, _ = suite.calls[0]
+    registered = selected[0]
+    assert registered.agent_id == DOCKER_AGENT_ID
+    assert registered.case_count >= 1
+
+
 class _FailingSuiteRunner:
     """Report an Agent that raised before completing its Case."""
-
-    def __init__(self, error_type: str = "AgentStartError") -> None:
-        self.error_type = error_type
 
     @staticmethod
     def new_suite_id() -> str:
@@ -337,7 +579,7 @@ class _FailingSuiteRunner:
                 SuiteAgentResult(
                     agent_id=agent.agent_id,
                     requested_case_count=agent.case_count,
-                    error_type=self.error_type,
+                    error_type="AgentStartError",
                     error_message="container exited during startup",
                 )
                 for agent in selected
@@ -345,89 +587,12 @@ class _FailingSuiteRunner:
         )
 
 
-def test_verification_fails_when_the_agent_cannot_start(repo_root: Path) -> None:
-    output: list[str] = []
-
-    exit_code = verify(
-        DOCKER_AGENT_ID,
-        registry_path=_registry_path(repo_root),
-        output_fn=output.append,
-        offline=_offline(pairs=1, runner=_FailingSuiteRunner()),
-    )
-
-    assert exit_code == 1
-    verdict = _verdict_line(output)
-    assert verdict.startswith("FAIL")
-    assert "AgentStartError" in verdict
+# --- invariants --------------------------------------------------------------
 
 
-def test_a_non_passing_sdk_judgment_fails_verification(repo_root: Path) -> None:
-    """The SDK Judge owns the verdict now that a real local Judge produces it.
-
-    The local Judge only ever reports an issue when an Input went unanswered, so
-    its rejection is a startup failure rather than an opinion about quality.
-    """
-
-    output: list[str] = []
-
-    exit_code = verify(
-        DOCKER_AGENT_ID,
-        registry_path=_registry_path(repo_root),
-        output_fn=output.append,
-        offline=_offline(pairs=1, runner=FakeSuiteRunner(result_status="issue")),
-    )
-
-    assert exit_code == 1
-    verdict = _verdict_line(output)
-    assert verdict.startswith("FAIL")
-    assert "issue" in verdict
-
-
-def test_a_passing_run_reports_the_sdk_judge_status(repo_root: Path) -> None:
-    output: list[str] = []
-
-    verify(
-        DOCKER_AGENT_ID,
-        registry_path=_registry_path(repo_root),
-        output_fn=output.append,
-        offline=_offline(pairs=1),
-        as_json=True,
-    )
-
-    assert _json_report(output)["sdk_judge_status"] == "pass"
-
-
-def test_shared_configuration_failure_fails_verification(repo_root: Path) -> None:
-    output: list[str] = []
-    runner = FakeSuiteRunner(error=SuiteConfigurationError("docker unavailable"))
-
-    exit_code = verify(
-        DOCKER_AGENT_ID,
-        registry_path=_registry_path(repo_root),
-        output_fn=output.append,
-        offline=_offline(pairs=0, runner=runner),
-    )
-
-    assert exit_code == 1
-    assert _verdict_line(output).startswith("FAIL")
-
-
-def test_substituted_secrets_are_reported(repo_root: Path) -> None:
-    resolver = OfflineSecretResolver({})
-    resolver.require("SOME_AGENT_SECRET")
-    output: list[str] = []
-
-    verify(
-        DOCKER_AGENT_ID,
-        registry_path=_registry_path(repo_root),
-        output_fn=output.append,
-        offline=_offline(resolver=resolver),
-    )
-
-    assert any("SOME_AGENT_SECRET" in line for line in output)
-
-
-def test_verification_never_writes_the_registry(repo_root: Path) -> None:
+def test_verification_never_writes_the_registry(
+    repo_root: Path, tmp_path: Path
+) -> None:
     registry_path = _registry_path(repo_root)
     before = registry_path.read_bytes()
 
@@ -435,175 +600,20 @@ def test_verification_never_writes_the_registry(repo_root: Path) -> None:
         DOCKER_AGENT_ID,
         registry_path=registry_path,
         output_fn=lambda _: None,
-        offline=_offline(),
+        runtime=_runtime(),  # type: ignore[arg-type]
+        output_path=tmp_path / "verify.jsonl",
     )
 
     assert registry_path.read_bytes() == before
 
 
-# --- artifacts ---------------------------------------------------------------
-
-
-def test_result_log_is_deleted_unless_kept(repo_root: Path) -> None:
-    output: list[str] = []
-
-    verify(
-        DOCKER_AGENT_ID,
-        registry_path=_registry_path(repo_root),
-        output_fn=output.append,
-        offline=_offline(),
-        as_json=True,
-    )
-
-    report = _json_report(output)
-    assert report["result_log"] is None
-    assert not any("agentbench-verify-" in _plain(line) for line in output)
-
-
-def test_kept_result_log_survives_and_holds_the_suite_summary(repo_root: Path) -> None:
-    output: list[str] = []
-
-    verify(
-        DOCKER_AGENT_ID,
-        registry_path=_registry_path(repo_root),
-        keep_artifacts=True,
-        output_fn=output.append,
-        offline=_offline(),
-        as_json=True,
-    )
-
-    path = Path(_json_report(output)["result_log"])
-    try:
-        events = [
-            json.loads(line)
-            for line in path.read_text(encoding="utf-8").splitlines()
-        ]
-        assert events[-1]["event"] == "suite_completed"
-    finally:
-        path.unlink(missing_ok=True)
-        path.parent.rmdir()
-
-
-def test_kept_result_log_path_is_shown_in_the_human_report(repo_root: Path) -> None:
-    output: list[str] = []
-
-    verify(
-        DOCKER_AGENT_ID,
-        registry_path=_registry_path(repo_root),
-        keep_artifacts=True,
-        output_fn=output.append,
-        offline=_offline(),
-    )
-
-    logged = [_plain(line) for line in output if _plain(line).startswith("log ")]
-    assert len(logged) == 1
-    path = Path(logged[0].removeprefix("log").strip())
-    try:
-        assert path.is_file()
-    finally:
-        path.unlink(missing_ok=True)
-        path.parent.rmdir()
-
-
-# --- credential isolation ----------------------------------------------------
-
-
-class _PoisonedEnviron(dict):
-    """Fail loudly if provider credentials are consulted."""
-
-    FORBIDDEN = ("DEFUZEX_API_KEY", "OPENROUTER_API_KEY")
-
-    def get(self, key, default=None):  # type: ignore[no-untyped-def]
-        if key in self.FORBIDDEN:
-            raise AssertionError(f"Offline verification read {key}")
-        return super().get(key, default)
-
-
-def test_local_provider_mode_never_consults_provider_credentials(
-    starter_agent: AgentRegistration,
+def test_json_mode_emits_one_document_and_nothing_else(
+    repo_root: Path, tmp_path: Path
 ) -> None:
-    runner = BenchmarkRunner(
-        environ=_PoisonedEnviron(),
-        sdk_run_factory=lambda **kwargs: None,  # type: ignore[arg-type, return-value]
+    """Stage chatter before the document would make the output unparseable."""
+
+    _, output = _run(
+        repo_root, _runtime(), output_path=tmp_path / "verify.jsonl", as_json=True
     )
 
-    mode = runner.validate_defuzex(
-        starter_agent,
-        case_provider=StartupCaseProvider(),
-        judge_provider=StartupJudgeProvider(),
-        max_inputs=1,
-        allow_local=True,
-        track_files=False,
-    )
-
-    assert mode == "local"
-
-
-def test_official_mode_would_have_tripped_the_poisoned_environment(
-    starter_agent: AgentRegistration,
-) -> None:
-    """Guards the test above: the tripwire really does fire without local providers."""
-
-    runner = BenchmarkRunner(
-        environ=_PoisonedEnviron(),
-        sdk_run_factory=lambda **kwargs: None,  # type: ignore[arg-type, return-value]
-    )
-
-    with pytest.raises(AssertionError, match="read DEFUZEX_API_KEY"):
-        runner.validate_defuzex(starter_agent, allow_local=True, track_files=False)
-
-
-def test_requested_llm_trace_reaches_output_when_no_live_panel_owns_the_terminal() -> None:
-    """A silenced live panel must not swallow a trace the caller asked for."""
-
-    written: list[str] = []
-    silent_panel = LLMActivity(lambda _: None, live_updates=False)
-
-    build_verify_runtime(
-        VerifyOptions(input_count=1, probe_text="ping", llm_trace="terminal"),
-        output_fn=written.append,
-        activity_sink=silent_panel,
-    )
-    # The composite sink is what the runtime hands to Docker; drive it directly.
-    _emit_trace_event(written)
-
-    assert any("LLM TRACE" in line for line in written)
-
-
-def _emit_trace_event(written: list[str]) -> None:
-    from agentbench.cli.verify_runtime import _trace_output
-
-    silent_panel = LLMActivity(lambda _: None, live_updates=False)
-    TerminalTraceSink(_trace_output(silent_panel, written.append)).emit(
-        TraceEvent(
-            "llm_request",
-            {
-                "call_id": "call-1",
-                "route_id": "openai-chat",
-                "provider": "offline",
-                "method": "POST",
-                "host": "api.openai.com",
-                "path": "/v1/chat/completions",
-            },
-        )
-    )
-
-
-def test_offline_runtime_targets_the_offline_plugin_with_a_synthetic_credential(
-    monkeypatch,
-) -> None:
-    monkeypatch.delenv(OFFLINE_UPSTREAM_KEY_ENV, raising=False)
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-
-    offline = build_verify_runtime(
-        VerifyOptions(input_count=1, probe_text="ping"), output_fn=lambda _: None
-    )
-    docker_runtime = offline.runner._benchmark_runner._agent_runner._runtime_factory._docker_builder()
-    target = docker_runtime._model_provider.resolve({})
-
-    assert target.target_plugin == OFFLINE_TARGET_PLUGIN
-    assert target.credential_env == OFFLINE_UPSTREAM_KEY_ENV
-    assert docker_runtime._egress == "blocked"
-    # The synthetic upstream credential resolves without touching real config.
-    assert docker_runtime._secret_resolver.require(OFFLINE_UPSTREAM_KEY_ENV)
-    assert offline.substituted_secrets == ()
+    assert _json_report(output)["command"] == "verify"
