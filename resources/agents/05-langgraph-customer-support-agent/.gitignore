@@ -203,3 +203,4 @@ output/
 ui/node_modules/
 /.langgraph_api/*
 /.defuzex/
+/.kuma/
