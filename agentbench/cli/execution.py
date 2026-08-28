@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from agentbench.harness import (
+    BenchmarkProgress,
     ProviderSelectionError,
     SuiteAgentResult,
     SuiteConfigurationError,
@@ -30,6 +33,16 @@ from .viewer import RunningViewer
 ViewerStarter = Callable[[Path], RunningViewer]
 
 
+class ProgressReporter(Protocol):
+    """A progress renderer that also releases any live terminal state."""
+
+    def __call__(self, event: BenchmarkProgress) -> None:
+        ...
+
+    def close(self) -> None:
+        ...
+
+
 @dataclass(frozen=True)
 class BenchmarkExecution:
     exit_code: int
@@ -46,6 +59,7 @@ def run_benchmark_once(
     output_fn: Callable[[str], None],
     viewer_starter: ViewerStarter | None,
     llm_activity: LLMActivity | None = None,
+    progress: ProgressReporter | None = None,
 ) -> BenchmarkExecution:
     suite_id = runner.new_suite_id()
     result_log: ResultLogWriter | None = None
@@ -64,7 +78,7 @@ def run_benchmark_once(
             output_fn(f"View: {viewer.url}")
 
     activity = llm_activity or LLMActivity(output_fn)
-    progress_printer = ProgressPrinter(output_fn, llm_activity=activity)
+    progress_printer = progress or ProgressPrinter(output_fn, llm_activity=activity)
     try:
         try:
             result = runner.run_defuzex(
@@ -112,6 +126,45 @@ def run_benchmark_once(
             result_log.path, None if viewer is None else viewer.url, output_fn
         )
     return BenchmarkExecution(0 if result.passed else 1, result, result_log, viewer)
+
+
+def sole_agent_result(
+    result: BenchmarkSuiteResult | None, agent_id: str
+) -> SuiteAgentResult | None:
+    """The one Agent's result in a single-Agent suite, or None if it is not there.
+
+    A suite that skipped anything, ran a different Agent, or ran more than one has
+    not answered the question a single-Agent command asked, so there is nothing to
+    read out of it.
+    """
+
+    if result is None or result.skipped_count != 0 or len(result.items) != 1:
+        return None
+    item = result.items[0]
+    return item if item.agent_id == agent_id else None
+
+
+def completed_every_case(item: SuiteAgentResult) -> bool:
+    """Every requested Case ran end to end without harness errors."""
+
+    return (
+        item.error_type is None
+        and item.completed_case_count == item.requested_case_count
+    )
+
+
+def default_result_path(
+    registry_path: str | Path, command: str, agent_id: str
+) -> Path:
+    """Where a single-Agent command archives its Run, under `results/`.
+
+    The Agent id reaches the filesystem here, so it is reduced to characters a
+    path can carry on every platform.
+    """
+
+    repo_root = Path(registry_path).resolve().parent.parent
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", agent_id).strip("-") or "agent"
+    return repo_root / "results" / f"{command}-{safe}.jsonl"
 
 
 def stop_viewer(viewer: RunningViewer) -> None:

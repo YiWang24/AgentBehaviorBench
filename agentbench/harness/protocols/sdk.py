@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import Protocol
 
+# The one report status that means the Judge raised nothing. Every other value
+# the SDK can report is a finding, so callers compare against this rather than
+# enumerating the alternatives.
+STATUS_PASS = "pass"
+
 
 class SDKReport(Protocol):
     """Public report fields consumed by AgentBench."""

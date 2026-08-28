@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from argparse import ArgumentParser, Namespace
 from collections.abc import Callable
 from pathlib import Path
@@ -11,7 +10,12 @@ from agentbench.harness import BenchmarkSuiteResult, SuiteRunner
 from agentbench.harness.registry import load_registry
 from agentbench.runtime.interception import DEFAULT_TRACE_MAX_BYTES
 
-from agentbench.cli.execution import run_benchmark_once
+from agentbench.cli.execution import (
+    completed_every_case,
+    default_result_path,
+    run_benchmark_once,
+    sole_agent_result,
+)
 from agentbench.cli.environment import load_project_environment
 from agentbench.cli.registry_status import RegistryStatusError, update_agent_status
 from agentbench.cli.TerminalUI import LLMActivity
@@ -94,7 +98,9 @@ def certify(
         )
         return 2
 
-    artifact_base = output_path or _default_output_path(registry_path, agent_id)
+    artifact_base = output_path or default_result_path(
+        registry_path, "certify", agent_id
+    )
     output_fn(f"Certifying adapting Agent: {agent_id}")
     output_fn(
         "The registry will change to ready if the Agent completes its Cases "
@@ -145,22 +151,8 @@ def certify(
 def _agent_completed_certification(
     result: BenchmarkSuiteResult, agent_id: str
 ) -> bool:
-    if result.skipped_count != 0:
-        return False
-    if len(result.items) != 1:
-        return False
-    item = result.items[0]
-    return (
-        item.agent_id == agent_id
-        and item.error_type is None
-        and item.completed_case_count == item.requested_case_count
-    )
-
-
-def _default_output_path(registry_path: str | Path, agent_id: str) -> Path:
-    repo_root = Path(registry_path).resolve().parent.parent
-    safe_agent_id = re.sub(r"[^A-Za-z0-9._-]+", "-", agent_id).strip("-")
-    return repo_root / "results" / f"certify-{safe_agent_id or 'agent'}.jsonl"
+    item = sole_agent_result(result, agent_id)
+    return item is not None and completed_every_case(item)
 
 
 FEATURE = CommandFeature(

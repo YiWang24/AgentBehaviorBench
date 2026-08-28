@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from uuid import uuid4
 
-from ..errors import ProviderSelectionError, SuiteConfigurationError
+from ..errors import ProviderSelectionError, SuiteConfigurationError, error_detail
 from ..progress import ProgressCallback, emit_progress
 from ..registry import AgentRegistration
 from ..result import BenchmarkSuiteResult, SuiteAgentResult
@@ -91,7 +91,7 @@ class SuiteRunner:
                 on_progress,
                 stage="sdk_check",
                 status="failed",
-                detail=_error_detail(exc),
+                detail=error_detail(exc),
             )
             raise SuiteConfigurationError(str(exc)) from exc
         emit_progress(
@@ -163,7 +163,3 @@ class SuiteRunner:
         if len(set(agent_ids)) != len(agent_ids):
             raise ValueError("A benchmark suite cannot contain duplicate Agent IDs")
 
-
-def _error_detail(exc: Exception) -> str:
-    message = str(exc).strip()
-    return type(exc).__name__ if not message else f"{type(exc).__name__}: {message}"

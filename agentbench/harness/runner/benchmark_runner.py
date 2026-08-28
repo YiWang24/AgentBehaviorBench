@@ -6,7 +6,9 @@ import os
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from ..errors import AgentInvocationError, ProviderSelectionError
+from kuma import KumaClient, create_run
+
+from ..errors import AgentInvocationError, ProviderSelectionError, error_detail
 from ..progress import ProgressCallback, emit_progress
 from ..protocols import SDKReport, SDKRun, SDKRunFactory
 from ..registry import AgentRegistration
@@ -30,7 +32,7 @@ class BenchmarkRunner:
         environ: Mapping[str, str] | None = None,
     ) -> None:
         self._agent_runner = agent_runner or AgentRunner()
-        self._sdk_run_factory = sdk_run_factory or _create_defuzex_run
+        self._sdk_run_factory = sdk_run_factory or create_run
         self._environ = os.environ if environ is None else environ
 
     def run_defuzex(
@@ -78,7 +80,7 @@ class BenchmarkRunner:
                 stage="agent_start",
                 status="failed",
                 agent_id=registration.agent_id,
-                detail=_error_detail(exc),
+                detail=error_detail(exc),
             )
             raise
 
@@ -105,7 +107,7 @@ class BenchmarkRunner:
                     stage="case_generation",
                     status="failed",
                     agent_id=registration.agent_id,
-                    detail=_error_detail(exc),
+                    detail=error_detail(exc),
                 )
                 raise
 
@@ -137,7 +139,7 @@ class BenchmarkRunner:
                     stage="benchmark_execution",
                     status="failed",
                     agent_id=registration.agent_id,
-                    detail=_error_detail(exc),
+                    detail=error_detail(exc),
                 )
                 raise
 
@@ -233,9 +235,12 @@ class BenchmarkRunner:
                         _step_failure(test_input.input_id, test_input.payload, exc),
                     )
                 self._record_failed_submission(sdk_run, exc)
+                # The cause has to be in the message, not just __cause__: results
+                # carry the error as plain strings, so anything left on the
+                # exception object is lost before a report can show it.
                 raise AgentInvocationError(
                     f"Agent {registration.agent_id!r} failed for "
-                    f"SDK Input {test_input.input_id!r}"
+                    f"SDK Input {test_input.input_id!r}: {error_detail(exc)}"
                 ) from exc
 
             step = BenchmarkStepResult(
@@ -299,8 +304,11 @@ class BenchmarkRunner:
             track_files=track_files,
             save_local=save_local,
         )
-        if self._sdk_run_factory is _create_defuzex_run:
-            _validate_defuzex_installation(provider_mode, run_kwargs)
+        if self._sdk_run_factory is create_run and provider_mode == "official":
+            # Constructing the client validates the credential's shape without
+            # making a request, so a bad key fails here rather than mid-Run.
+            api_key = run_kwargs.get("api_key")
+            KumaClient(api_key=api_key if isinstance(api_key, str) else None)
         return provider_mode, run_kwargs
 
     @staticmethod
@@ -342,8 +350,13 @@ class BenchmarkRunner:
             "save_local": save_local,
         }
         if has_case_provider and has_judge_provider:
-            if requirement_path is not None:
-                common["requirement_path"] = requirement_path
+            # Local Providers may still want the Agent's requirement: the SDK parses
+            # it and enforces its declared input_type, so a local Case stays
+            # consistent with what the official Providers would have demanded. It
+            # stays optional because an Agent is verifiable before it has one.
+            resolved_requirement = requirement_path or registration.requirement_path
+            if resolved_requirement is not None:
+                common["requirement_path"] = resolved_requirement
             if max_inputs is None:
                 raise ProviderSelectionError(
                     "Local custom Providers require max_inputs"
@@ -377,39 +390,6 @@ class BenchmarkRunner:
 
         return explicit or self._environ.get("DEFUZEX_API_KEY")
 
-
-def _create_defuzex_run(**kwargs: object) -> SDKRun:
-    """Import the SDK lazily so agent-only usage remains lightweight."""
-
-    try:
-        from defuzex import create_run
-    except ModuleNotFoundError as exc:
-        raise ProviderSelectionError(
-            "DefuzeX SDK is not installed in the active Python environment"
-        ) from exc
-    return create_run(**kwargs)  # type: ignore[arg-type, return-value]
-
-
-def _validate_defuzex_installation(
-    provider_mode: str, run_kwargs: Mapping[str, object]
-) -> None:
-    """Import the SDK and validate official credentials without a request."""
-
-    try:
-        from defuzex import DefuzeClient
-    except ModuleNotFoundError as exc:
-        raise ProviderSelectionError(
-            "DefuzeX SDK is not installed in the active Python environment"
-        ) from exc
-
-    if provider_mode == "official":
-        api_key = run_kwargs.get("api_key")
-        DefuzeClient(api_key=api_key if isinstance(api_key, str) else None)
-
-
-def _error_detail(exc: Exception) -> str:
-    message = str(exc).strip()
-    return type(exc).__name__ if not message else f"{type(exc).__name__}: {message}"
 
 
 def _step_failure(
