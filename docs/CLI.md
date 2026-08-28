@@ -187,10 +187,18 @@ Viewer action? [r rerun/q quit]:
 traffic observable?** It does not measure benchmark quality and it does not change
 the Registry.
 
+The DefuzeX SDK drives the Run exactly as it does for `run` and `certify`: the
+same `create_run` call, the same strict `get_input`/`submit` handshake, the same
+`TestReport`. What differs is that `verify` supplies both the Case Provider and the
+Judge Provider itself, which selects the SDK's **local Provider mode**. With a
+custom pair the SDK builds no Backend client at all, so no credential is resolved
+and no request leaves the process.
+
 The whole run is hermetic:
 
 - no `DEFUZEX_API_KEY` and no `OPENROUTER_API_KEY` are read;
-- the DefuzeX SDK is never imported;
+- the SDK is imported and used, but only its local Provider path runs, so it
+  never contacts the DefuzeX Backend;
 - the container network is created with `--internal`, so nothing reaches the
   internet;
 - model replies are generated inside the Model Interceptor by the `offline-mock`
@@ -247,10 +255,18 @@ Verification passes when all of the following hold:
 
 - the Agent image builds and the container starts;
 - every probe input is invoked without a startup, runtime, or invocation error;
+- the SDK Judge returns `pass`;
 - at least one complete `llm_request`/`llm_response` pair is captured.
 
-A Judge-style report status is irrelevant here. An Agent whose reply is poor still
-passes verification, because the adapter and runtime are what is under test.
+The local Judge grades only health, never quality: it reports an issue when an
+Input came back unanswered — a non-`completed` submission, or output that is empty
+— and passes anything else. That distinction matters, because the model replies
+come from a local mock, so the Agent's wording carries no signal worth grading. An
+Agent whose reply is poor still passes; an Agent that returns nothing does not.
+
+The SDK's own status is reported separately from the verdict, as `judge:` in the
+report and `sdk_judge_status` in the JSON. The two can differ: a Run the Judge
+passed still fails verification if none of its model traffic was observable.
 
 ### 4.6 Report Layout
 
@@ -259,11 +275,11 @@ model exchanged, and the verdict.
 
 ```text
 verify · langgraph-customer-support-agent
-       offline · no credentials · egress blocked · registry untouched
+       SDK local providers · no credentials · egress blocked · registry untouched
 
   ✓  configuration   local providers
   ✓  agent start     ContainerAgentAdapter
-  ✓  case            offline_d9075725a90…
+  ✓  case            run_d9075725a90b41c…
   ✓  agent run       2 model calls
 
      01  ▸ Reply with a short confirmation that you received thi…
@@ -271,8 +287,11 @@ verify · langgraph-customer-support-agent
      02  ▸ Available Functions & Actions - search_vector_knowled…
          ◂ offline verification reply                      200 · 0.8ms
 
-  PASS   1/1 cases · 2 model request/response pairs captured
+  PASS   1/1 cases · 2 model request/response pairs captured · judge: pass
 ```
+
+The Case identifier is the SDK's own Run ID, so it can be correlated with the
+result log and with anything the SDK recorded.
 
 On a terminal the stage currently running is shown as a self-erasing live line, so
 only finished stages remain. Redirected output skips the live line entirely instead
@@ -309,6 +328,7 @@ and the document are the whole contract:
   "agent_id": "langgraph-customer-support-agent",
   "verdict": "pass",
   "cases": {"completed": 1, "requested": 1},
+  "sdk_judge_status": "pass",
   "model_calls": {
     "captured_pairs": 2,
     "calls": [
@@ -332,6 +352,12 @@ and the document are the whole contract:
 section 4.4. It maps onto the exit codes in section 8 — `pass` is `0`, `fail` is `1`,
 `error` is `2` — so the document does not repeat the status the process already
 returns. `result_log` is populated only with `--keep-artifacts`.
+
+`sdk_judge_status` is the DefuzeX `TestReport` status — `pass`, `issue`, or
+`insufficient_evidence` — and is `null` when the Run never reached a report. It is
+reported separately from `verdict` because they answer different questions: the
+Judge grades the Run, while `verdict` also requires the model traffic to have been
+observable.
 
 ## 5. `certify`
 

@@ -22,7 +22,6 @@ if str(REPO_ROOT) not in sys.path:
 
 from agentbench.cli.features.verify import verify  # noqa: E402
 from agentbench.cli.offline_runtime import build_offline_runtime  # noqa: E402
-from agentbench.harness.offline import probe_inputs  # noqa: E402
 
 DEFAULT_AGENT_ID = "langgraph-customer-support-agent"
 PROBE_COUNT = 2
@@ -40,11 +39,7 @@ def main() -> int:
     def emit(line: str) -> None:
         lines.append(line)
 
-    offline = build_offline_runtime(
-        max_inputs=PROBE_COUNT,
-        probes=probe_inputs(count=PROBE_COUNT),
-        output_fn=emit,
-    )
+    offline = build_offline_runtime(max_inputs=PROBE_COUNT, output_fn=emit)
     # The JSON summary is the contract worth asserting on; the human report is
     # free to change layout without breaking this check.
     exit_code = verify(
@@ -61,9 +56,18 @@ def main() -> int:
     print(f"exit code                  : {exit_code}")
     print(f"captured request/response  : {report['model_calls']['captured_pairs']}")
     print(f"substituted secrets        : {report['substituted_secrets'] or 'none'}")
+    print(f"SDK judge status           : {report['sdk_judge_status']}")
 
     if exit_code != 0 or report["verdict"] != "pass":
         print(f"offline verification smoke test FAILED: {report.get('reason')}")
+        return 1
+    if report["sdk_judge_status"] != "pass":
+        # A missing status means the SDK never produced a report, which would mean
+        # the Run was not actually driven by the SDK.
+        print(
+            "offline verification smoke test FAILED: expected the SDK Judge to "
+            f"pass, saw {report['sdk_judge_status']!r}"
+        )
         return 1
     if report["model_calls"]["captured_pairs"] < PROBE_COUNT:
         print(

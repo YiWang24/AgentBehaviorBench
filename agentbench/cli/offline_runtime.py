@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from agentbench.harness import AgentRunner, BenchmarkRunner, SuiteRunner
 from agentbench.harness.offline import (
-    OfflineRunFactory,
+    DEFAULT_PROBE_TEXT,
     OfflineSecretResolver,
     OfflineSuiteRunner,
 )
@@ -62,7 +62,7 @@ class OfflineRuntime:
 def build_offline_runtime(
     *,
     max_inputs: int,
-    probes: tuple[object, ...],
+    probe_text: str = DEFAULT_PROBE_TEXT,
     output_fn: Callable[[str], None],
     llm_trace: str = "off",
     llm_trace_max_bytes: int = DEFAULT_TRACE_MAX_BYTES,
@@ -103,13 +103,14 @@ def build_offline_runtime(
                 )
             )
         ),
-        # A local factory also stops BenchmarkRunner from importing the DefuzeX SDK.
-        sdk_run_factory=OfflineRunFactory(probes=probes),
+        # The SDK itself owns the Run: only the Provider pair is local, which is
+        # what keeps the whole path free of DefuzeX credentials and networking.
     )
     return OfflineRuntime(
         runner=OfflineSuiteRunner(
             benchmark_runner=benchmark_runner,
             max_inputs=max_inputs,
+            probe_text=probe_text,
         ),
         trace_state=trace_state,
         secret_resolver=secret_resolver,

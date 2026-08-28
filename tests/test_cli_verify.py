@@ -20,10 +20,9 @@ from agentbench.harness import (
     SuiteConfigurationError,
 )
 from agentbench.harness.offline import (
-    OfflineCaseProvider,
-    OfflineJudgeProvider,
     OfflineSecretResolver,
-    probe_inputs,
+    StartupCaseProvider,
+    StartupJudgeProvider,
 )
 from agentbench.cli.presentation import ANSI_PATTERN
 from agentbench.cli.TerminalUI.call_log import CallRecorder
@@ -291,10 +290,12 @@ def test_verification_fails_when_the_agent_cannot_start(repo_root: Path) -> None
     assert "AgentStartError" in verdict
 
 
-def test_a_poor_judge_status_alone_does_not_fail_verification(
-    repo_root: Path,
-) -> None:
-    """Verification answers 'does it start', not 'is the output any good'."""
+def test_a_non_passing_sdk_judgment_fails_verification(repo_root: Path) -> None:
+    """The SDK Judge owns the verdict now that a real local Judge produces it.
+
+    The local Judge only ever reports an issue when an Input went unanswered, so
+    its rejection is a startup failure rather than an opinion about quality.
+    """
 
     output: list[str] = []
 
@@ -305,8 +306,24 @@ def test_a_poor_judge_status_alone_does_not_fail_verification(
         offline=_offline(pairs=1, runner=FakeSuiteRunner(result_status="issue")),
     )
 
-    assert exit_code == 0
-    assert _verdict_line(output).startswith("PASS")
+    assert exit_code == 1
+    verdict = _verdict_line(output)
+    assert verdict.startswith("FAIL")
+    assert "issue" in verdict
+
+
+def test_a_passing_run_reports_the_sdk_judge_status(repo_root: Path) -> None:
+    output: list[str] = []
+
+    verify(
+        DOCKER_AGENT_ID,
+        registry_path=_registry_path(repo_root),
+        output_fn=output.append,
+        offline=_offline(pairs=1),
+        as_json=True,
+    )
+
+    assert _json_report(output)["sdk_judge_status"] == "pass"
 
 
 def test_shared_configuration_failure_fails_verification(repo_root: Path) -> None:
@@ -441,8 +458,8 @@ def test_local_provider_mode_never_consults_provider_credentials(
 
     mode = runner.validate_defuzex(
         starter_agent,
-        case_provider=OfflineCaseProvider(),
-        judge_provider=OfflineJudgeProvider(),
+        case_provider=StartupCaseProvider(),
+        judge_provider=StartupJudgeProvider(),
         max_inputs=1,
         allow_local=True,
         track_files=False,
@@ -473,7 +490,7 @@ def test_requested_llm_trace_reaches_output_when_no_live_panel_owns_the_terminal
 
     build_offline_runtime(
         max_inputs=1,
-        probes=probe_inputs(count=1),
+        probe_text="ping",
         output_fn=written.append,
         llm_trace="terminal",
         activity_sink=silent_panel,
@@ -511,7 +528,7 @@ def test_offline_runtime_targets_the_offline_plugin_with_a_synthetic_credential(
 
     offline = build_offline_runtime(
         max_inputs=1,
-        probes=probe_inputs(count=1),
+        probe_text="ping",
         output_fn=lambda _: None,
     )
     docker_runtime = offline.runner._benchmark_runner._agent_runner._runtime_factory._docker_builder()

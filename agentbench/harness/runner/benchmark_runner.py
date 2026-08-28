@@ -345,8 +345,13 @@ class BenchmarkRunner:
             "save_local": save_local,
         }
         if has_case_provider and has_judge_provider:
-            if requirement_path is not None:
-                common["requirement_path"] = requirement_path
+            # Local Providers may still want the Agent's requirement: the SDK parses
+            # it and enforces its declared input_type, so a local Case stays
+            # consistent with what the official Providers would have demanded. It
+            # stays optional because an Agent is verifiable before it has one.
+            resolved_requirement = requirement_path or registration.requirement_path
+            if resolved_requirement is not None:
+                common["requirement_path"] = resolved_requirement
             if max_inputs is None:
                 raise ProviderSelectionError(
                     "Local custom Providers require max_inputs"

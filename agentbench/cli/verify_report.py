@@ -67,6 +67,10 @@ class VerifyReport:
     result_log: Path | None = None
     reason: str | None = None
     calls: tuple[CallRecord, ...] = ()
+    # The DefuzeX SDK's own report status for the Run, distinct from this
+    # command's verdict: the Judge can pass a Run whose model traffic verify
+    # still rejects as unobservable.
+    judge_status: str | None = None
 
     @property
     def passed(self) -> bool:
@@ -93,6 +97,7 @@ class VerifyReport:
                     "completed": self.completed_cases,
                     "requested": self.requested_cases,
                 },
+                "sdk_judge_status": self.judge_status,
                 "model_calls": {
                     "captured_pairs": self.captured_pairs,
                     "calls": [
@@ -120,8 +125,8 @@ def print_header(agent_id: str, output_fn: Callable[[str], None]) -> None:
     output_fn("")
     output_fn(f"{ANSI_BOLD}verify{ANSI_RESET} {SEPARATOR} {ANSI_BOLD}{agent_id}{ANSI_RESET}")
     output_fn(
-        f"       offline {SEPARATOR} no credentials {SEPARATOR} egress blocked "
-        f"{SEPARATOR} registry untouched"
+        f"       SDK local providers {SEPARATOR} no credentials {SEPARATOR} "
+        f"egress blocked {SEPARATOR} registry untouched"
     )
     output_fn("")
 
@@ -176,9 +181,13 @@ def _print_verdict(report: VerifyReport, output_fn: Callable[[str], None]) -> No
     if report.passed:
         badge = f"{ANSI_GREEN}{ANSI_BOLD}PASS{ANSI_RESET}"
         pairs = report.captured_pairs
+        judged = (
+            "" if report.judge_status is None else f" {SEPARATOR} judge: {report.judge_status}"
+        )
         detail = (
             f"{report.completed_cases}/{report.requested_cases} cases {SEPARATOR} "
             f"{pairs} model request/response pair{'' if pairs == 1 else 's'} captured"
+            f"{judged}"
         )
     else:
         badge = f"{ANSI_RED}{ANSI_BOLD}FAIL{ANSI_RESET}"

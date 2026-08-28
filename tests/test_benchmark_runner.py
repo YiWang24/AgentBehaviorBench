@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from agentbench.harness import (
@@ -329,6 +331,31 @@ def test_explicit_provider_pair_selects_local_mode(
     assert factory.kwargs["judge_provider"] is judge_provider
     assert factory.kwargs["max_inputs"] == 1
     assert "api_key" not in factory.kwargs
+    # Local Providers still receive the Agent's requirement: the SDK parses it and
+    # enforces its declared input_type, so a local Case matches what the official
+    # Providers would have demanded. Only the credential stays out.
+    assert factory.kwargs["requirement_path"] == starter_agent.requirement_path
+
+
+def test_local_mode_runs_without_any_registered_requirement(
+    starter_agent: AgentRegistration,
+) -> None:
+    """An Agent is verifiable while still being adapted, before it has one."""
+
+    factory = CapturingRunFactory()
+    runner = BenchmarkRunner(sdk_run_factory=factory, environ={})
+
+    result = runner.run_defuzex(
+        replace(starter_agent, requirement_path=None),
+        case_provider=object(),
+        judge_provider=object(),
+        max_inputs=1,
+        allow_local=True,
+        track_files=False,
+    )
+
+    assert result.provider_mode == "local"
+    assert factory.kwargs is not None
     assert "requirement_path" not in factory.kwargs
 
 

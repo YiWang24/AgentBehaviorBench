@@ -6,12 +6,12 @@ import shutil
 import sys
 import tempfile
 from argparse import ArgumentParser, Namespace
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
 
 from agentbench.harness import BenchmarkSuiteResult, SuiteAgentResult
-from agentbench.harness.offline import DEFAULT_PROBE_TEXT, probe_inputs
+from agentbench.harness.offline import DEFAULT_PROBE_TEXT, STATUS_PASS
 from agentbench.harness.registry import AgentRegistration, load_registry
 from agentbench.runtime.agentcontainer import runtime_type
 from agentbench.runtime.interception import (
@@ -121,9 +121,14 @@ def verify(
 ) -> int:
     """Start one Agent offline and confirm its model traffic is observable.
 
-    Nothing here reads ``DEFUZEX_API_KEY`` or ``OPENROUTER_API_KEY``, contacts a
-    network, or writes the Registry. A pass means the adapter and runtime are
-    healthy; it says nothing about benchmark quality.
+    The DefuzeX SDK owns the Run, as it does for ``run`` and ``certify``; only the
+    Case and Judge Providers are local, which is what selects the SDK's local mode
+    and leaves it with no Backend to call. Nothing here reads ``DEFUZEX_API_KEY``
+    or ``OPENROUTER_API_KEY``, reaches a network, or writes the Registry.
+
+    A pass means the adapter and runtime are healthy. It says nothing about
+    benchmark quality: replies come from a local mock model, so the local Judge
+    only checks that every Input was answered at all.
     """
 
     # In JSON mode nothing may reach stdout before the document itself.
@@ -145,7 +150,7 @@ def verify(
         offline=offline
         or build_offline_runtime(
             max_inputs=input_count,
-            probes=probe_inputs(probe_text, count=input_count),
+            probe_text=probe_text,
             output_fn=stage_output,
             llm_trace=llm_trace,
             llm_trace_max_bytes=llm_trace_max_bytes,
@@ -247,6 +252,7 @@ def _build_report(
         common.update(
             completed_cases=item.completed_case_count,
             requested_cases=item.requested_case_count,
+            judge_status=_judge_status(item),
         )
 
     if item is None or not _started(item):
@@ -259,6 +265,17 @@ def _build_report(
             **common,  # type: ignore[arg-type]
         )
 
+    # The SDK, not this command, decides whether the Run satisfied its Case. A
+    # local Judge still answers only the startup question, but it answers it
+    # through the same report contract an official Judge would use.
+    judgment = _judge_rejection(item)
+    if judgment is not None:
+        return VerifyReport(
+            verdict=FAIL,
+            reason=judgment,
+            **common,  # type: ignore[arg-type]
+        )
+
     if offline.captured_pair_count < 1:
         return VerifyReport(
             verdict=FAIL,
@@ -267,6 +284,35 @@ def _build_report(
         )
 
     return VerifyReport(verdict=PASS, **common)  # type: ignore[arg-type]
+
+
+def _judge_status(item: SuiteAgentResult) -> str | None:
+    """The SDK report status, when the Run got far enough to produce one."""
+
+    benchmark = item.benchmark
+    if benchmark is None or benchmark.report is None:
+        return None
+    return benchmark.report.status
+
+
+def _judge_rejection(item: SuiteAgentResult) -> str | None:
+    """Explain a non-passing Judgment, or None when the SDK passed the Run."""
+
+    benchmark = item.benchmark
+    if benchmark is None or benchmark.report is None:
+        return "The SDK Run finished without producing a report"
+    report = benchmark.report
+    if report.status == STATUS_PASS:
+        return None
+    detail = "; ".join(_issue_text(issue) for issue in report.issues)
+    summary = f"SDK Judge reported {report.status!r}"
+    return f"{summary}: {detail}" if detail else summary
+
+
+def _issue_text(issue: object) -> str:
+    if isinstance(issue, Mapping):
+        return str(issue.get("message") or issue.get("code") or issue)
+    return str(issue)
 
 
 def _fail_early(
@@ -346,7 +392,8 @@ FEATURE = CommandFeature(
     description=(
         "Start one registered Agent with network egress blocked and locally "
         "generated model replies, then confirm it responds and that every model "
-        "call is captured. Uses no DefuzeX or provider credentials and never "
+        "call is captured. Drives a real DefuzeX SDK Run through local Case and "
+        "Judge Providers, so it uses no DefuzeX or provider credentials and never "
         "changes the Registry."
     ),
     configure=configure_parser,

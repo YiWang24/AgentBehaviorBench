@@ -1,29 +1,21 @@
-"""Offline startup verification: local providers, local Run, no official SDK."""
+"""Offline startup verification: real SDK Run, local Providers, no credentials."""
 
-from .run import (
+from .providers import (
     DEFAULT_PROBE_TEXT,
-    OfflineCaseProvider,
-    OfflineHistoryEntry,
-    OfflineJudgeProvider,
-    OfflineReport,
-    OfflineRunFactory,
-    OfflineSdkRun,
-    OfflineTestInput,
-    probe_inputs,
+    STATUS_ISSUE,
+    STATUS_PASS,
+    StartupCaseProvider,
+    StartupJudgeProvider,
 )
 from .secrets import OfflineSecretResolver
 from .suite import OfflineSuiteRunner
 
 __all__ = [
     "DEFAULT_PROBE_TEXT",
-    "OfflineCaseProvider",
-    "OfflineHistoryEntry",
-    "OfflineJudgeProvider",
-    "OfflineReport",
-    "OfflineRunFactory",
-    "OfflineSdkRun",
+    "STATUS_ISSUE",
+    "STATUS_PASS",
     "OfflineSecretResolver",
     "OfflineSuiteRunner",
-    "OfflineTestInput",
-    "probe_inputs",
+    "StartupCaseProvider",
+    "StartupJudgeProvider",
 ]
