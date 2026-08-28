@@ -40,6 +40,33 @@ class ModelTargetProvider(Protocol):
         ...
 
 
+def _validated_model(model: str, *, label: str) -> str:
+    """A model name with no embedded whitespace, which no provider accepts."""
+
+    model = model.strip()
+    if any(character.isspace() for character in model):
+        raise InterceptionConfigurationError(
+            f"{label} model must not contain whitespace: {model!r}"
+        )
+    return model
+
+
+def _validated_base_url(raw: str, *, default: str, env_name: str) -> str:
+    """An absolute HTTPS base URL, with no trailing slash.
+
+    An empty or blank override falls back to the default rather than failing:
+    an exported-but-unset variable is the same as not setting one.
+    """
+
+    base_url = raw.strip() or default
+    parsed = urlsplit(base_url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise InterceptionConfigurationError(
+            f"{env_name} must be an absolute HTTPS URL"
+        )
+    return base_url.rstrip("/")
+
+
 @dataclass(frozen=True, slots=True)
 class OpenRouterProvider:
     """Resolve one model-controlled OpenRouter target for a benchmark run."""
@@ -47,24 +74,19 @@ class OpenRouterProvider:
     model: str | None = None
 
     def resolve(self, environ: Mapping[str, str]) -> ModelTargetConfig:
-        model = (self.model or environ.get(OPENROUTER_MODEL_ENV, "")).strip()
+        model = _validated_model(
+            self.model or environ.get(OPENROUTER_MODEL_ENV, ""), label="OpenRouter"
+        )
         if not model:
             raise InterceptionConfigurationError(
                 "OpenRouter model is required; pass --model or set OPENROUTER_MODEL"
             )
-        if any(character.isspace() for character in model):
-            raise InterceptionConfigurationError(
-                f"OpenRouter model must not contain whitespace: {model!r}"
-            )
 
-        base_url = environ.get(
-            OPENROUTER_BASE_URL_ENV, DEFAULT_OPENROUTER_BASE_URL
-        ).strip()
-        parsed = urlsplit(base_url)
-        if parsed.scheme != "https" or not parsed.hostname:
-            raise InterceptionConfigurationError(
-                "OPENROUTER_BASE_URL must be an absolute HTTPS URL"
-            )
+        base_url = _validated_base_url(
+            environ.get(OPENROUTER_BASE_URL_ENV, ""),
+            default=DEFAULT_OPENROUTER_BASE_URL,
+            env_name=OPENROUTER_BASE_URL_ENV,
+        )
 
         headers: dict[str, str] = {}
         referer = environ.get("OPENROUTER_HTTP_REFERER", "").strip()
@@ -77,7 +99,7 @@ class OpenRouterProvider:
         return ModelTargetConfig(
             provider_id="openrouter",
             target_plugin="openrouter",
-            base_url=base_url.rstrip("/"),
+            base_url=base_url,
             model=model,
             credential_env=OPENROUTER_API_KEY_ENV,
             headers=MappingProxyType(headers),
@@ -97,28 +119,20 @@ class DeepSeekProvider:
     model: str | None = None
 
     def resolve(self, environ: Mapping[str, str]) -> ModelTargetConfig:
-        model = (
-            self.model or environ.get(DEEPSEEK_MODEL_ENV, "") or DEFAULT_DEEPSEEK_MODEL
-        ).strip()
-        if any(character.isspace() for character in model):
-            raise InterceptionConfigurationError(
-                f"DeepSeek model must not contain whitespace: {model!r}"
-            )
-
-        base_url = (
-            environ.get(DEEPSEEK_BASE_URL_ENV, "").strip() or DEFAULT_DEEPSEEK_BASE_URL
-        )
-        parsed = urlsplit(base_url)
-        if parsed.scheme != "https" or not parsed.hostname:
-            raise InterceptionConfigurationError(
-                f"{DEEPSEEK_BASE_URL_ENV} must be an absolute HTTPS URL"
-            )
-
         return ModelTargetConfig(
             provider_id="deepseek",
             target_plugin="deepseek",
-            base_url=base_url.rstrip("/"),
-            model=model,
+            base_url=_validated_base_url(
+                environ.get(DEEPSEEK_BASE_URL_ENV, ""),
+                default=DEFAULT_DEEPSEEK_BASE_URL,
+                env_name=DEEPSEEK_BASE_URL_ENV,
+            ),
+            model=_validated_model(
+                self.model
+                or environ.get(DEEPSEEK_MODEL_ENV, "")
+                or DEFAULT_DEEPSEEK_MODEL,
+                label="DeepSeek",
+            ),
             credential_env=DEEPSEEK_API_KEY_ENV,
         )
 
