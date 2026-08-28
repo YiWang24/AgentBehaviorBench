@@ -1,4 +1,17 @@
-"""Errors raised by AgentBench harness orchestration."""
+"""Errors raised by AgentBench harness orchestration, and how they are named."""
+
+
+def error_detail(exc: Exception) -> str:
+    """Name the exception, and its message when it carries one.
+
+    Every stage that reports a failure to a caller formats it this way. Keeping
+    one definition is what stops two phases of the same run from describing the
+    same exception differently — a bare message in one, a qualified name in the
+    other — which reads as two unrelated faults.
+    """
+
+    message = str(exc).strip()
+    return type(exc).__name__ if not message else f"{type(exc).__name__}: {message}"
 
 
 class AgentStartError(RuntimeError):

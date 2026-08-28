@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from urllib.parse import quote
 
@@ -171,13 +171,14 @@ def print_viewer_footer(
     viewer_url: str | None,
     output_fn: Callable[[str], None],
 ) -> None:
-    output_fn("")
-    output_fn(panel_rule("RESULT VIEWER", ANSI_CYAN))
-    output_fn(panel_line(f"Result saved: {result_log_path}"))
+    lines = [f"Result saved: {result_log_path}"]
     if viewer_url is not None:
-        output_fn(panel_line(f"Live viewer: {viewer_url}"))
-    output_fn(panel_line(f"Open later: python -m agentbench view {result_log_path}"))
-    output_fn(panel_rule("", ANSI_CYAN))
+        lines.append(f"Live viewer: {viewer_url}")
+    lines.append(f"Open later: python -m agentbench view {result_log_path}")
+
+    output_fn("")
+    for line in render_panel("RESULT VIEWER", lines, ANSI_CYAN):
+        output_fn(line)
 
 
 def request_viewer_action(
@@ -208,19 +209,37 @@ def agent_view_url(viewer_url: str, agent_id: str) -> str:
     return f"{viewer_url}{separator}#agent={quote(agent_id, safe='')}"
 
 
-def panel_rule(title: str, color: str) -> str:
+def panel_rule(title: str, color: str, width: int = PANEL_INNER_WIDTH) -> str:
     if not title:
-        return f"{color}+{'-' * PANEL_INNER_WIDTH}+{ANSI_RESET}"
+        return f"{color}+{'-' * width}+{ANSI_RESET}"
 
     label = f" {title} "
-    right = PANEL_INNER_WIDTH - len(label)
+    right = max(width - len(label), 0)
     return f"{color}+{label}{'-' * right}+{ANSI_RESET}"
 
 
-def panel_line(text: str) -> str:
+def panel_line(text: str, width: int = PANEL_INNER_WIDTH) -> str:
     content = f" {text}"
-    padding = max(PANEL_INNER_WIDTH - visible_width(content), 0)
+    padding = max(width - visible_width(content), 0)
     return f"{ANSI_CYAN}|{ANSI_RESET}{content}{' ' * padding}{ANSI_CYAN}|{ANSI_RESET}"
+
+
+def render_panel(title: str, lines: Sequence[str], color: str) -> list[str]:
+    """Build a panel wide enough for its content.
+
+    A fixed width used to push the closing border past the rule whenever a result
+    path was longer than the panel. Growing the panel keeps the border aligned and,
+    unlike truncating, leaves paths and commands intact to copy.
+    """
+
+    width = max(
+        [PANEL_INNER_WIDTH, len(title) + 2, *(visible_width(line) + 1 for line in lines)]
+    )
+    return [
+        panel_rule(title, color, width),
+        *(panel_line(line, width) for line in lines),
+        panel_rule("", color, width),
+    ]
 
 
 def display_path(path: Path) -> str:

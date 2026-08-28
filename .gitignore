@@ -7,3 +7,11 @@ __pycache__/
 *.egg-info/
 
 results/
+
+# Local tooling that is not part of the benchmark
+.venv/
+.ruff_cache/
+.remember/
+
+# Claude Code configuration, skills, and worktrees are per-developer state
+.claude/

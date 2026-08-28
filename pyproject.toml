@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Benchmark harness and framework adapters for DefuzeX agents."
 requires-python = ">=3.10"
 dependencies = [
-    "defuzex>=4,<5",
+    "kuma-defuzex",
     "langgraph>=1.0,<2",
     "python-dotenv>=1,<2",
     "tomli>=2,<3; python_version < '3.11'",

@@ -1,6 +1,9 @@
+from dataclasses import replace
+
 import pytest
 
 from agentbench.harness import (
+    AgentInvocationError,
     AgentRegistration,
     BenchmarkProgress,
     BenchmarkRunner,
@@ -207,6 +210,55 @@ def test_benchmark_runner_emits_step_failure_after_judge_error(
     assert failure.error_message == "judge unavailable"
 
 
+class ExplodingAgentRunner:
+    """Start cleanly, then fail the way a crashed Agent container does."""
+
+    adapter_name = "FakeAdapter"
+
+    def __init__(self, error: Exception) -> None:
+        self._error = error
+
+    def start(self, agent: AgentRegistration) -> "ExplodingAgentRunner":
+        del agent
+        return self
+
+    def invoke(self, value: object, *, run_config: object | None = None) -> object:
+        del value, run_config
+        raise self._error
+
+    def __enter__(self) -> "ExplodingAgentRunner":
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        return None
+
+
+def test_invocation_failure_names_the_underlying_cause(
+    starter_agent: AgentRegistration,
+) -> None:
+    """Results carry errors as plain strings.
+
+    Anything left only on ``__cause__`` is gone by the time a report is built, so
+    a reader would see that the Agent failed without ever learning why.
+    """
+
+    runner = BenchmarkRunner(
+        agent_runner=ExplodingAgentRunner(  # type: ignore[arg-type]
+            RuntimeError("AttributeError: 'str' object has no attribute 'get'")
+        ),
+        sdk_run_factory=CapturingRunFactory(),
+        environ={"DEFUZEX_API_KEY": "dfx_test"},
+    )
+
+    with pytest.raises(AgentInvocationError) as caught:
+        runner.run_defuzex(starter_agent, allow_local=True, track_files=False)
+
+    message = str(caught.value)
+    assert "langgraph-new-project" in message
+    assert "input_test" in message
+    assert "RuntimeError: AttributeError: 'str' object has no attribute 'get'" in message
+
+
 def test_benchmark_runner_reports_case_generation_failure(
     starter_agent: AgentRegistration,
 ) -> None:
@@ -279,6 +331,31 @@ def test_explicit_provider_pair_selects_local_mode(
     assert factory.kwargs["judge_provider"] is judge_provider
     assert factory.kwargs["max_inputs"] == 1
     assert "api_key" not in factory.kwargs
+    # Local Providers still receive the Agent's requirement: the SDK parses it and
+    # enforces its declared input_type, so a local Case matches what the official
+    # Providers would have demanded. Only the credential stays out.
+    assert factory.kwargs["requirement_path"] == starter_agent.requirement_path
+
+
+def test_local_mode_runs_without_any_registered_requirement(
+    starter_agent: AgentRegistration,
+) -> None:
+    """An Agent is verifiable while still being adapted, before it has one."""
+
+    factory = CapturingRunFactory()
+    runner = BenchmarkRunner(sdk_run_factory=factory, environ={})
+
+    result = runner.run_defuzex(
+        replace(starter_agent, requirement_path=None),
+        case_provider=object(),
+        judge_provider=object(),
+        max_inputs=1,
+        allow_local=True,
+        track_files=False,
+    )
+
+    assert result.provider_mode == "local"
+    assert factory.kwargs is not None
     assert "requirement_path" not in factory.kwargs
 
 

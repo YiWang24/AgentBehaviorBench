@@ -8,10 +8,10 @@ from agentbench.harness import AgentRunner, BenchmarkRunner, SuiteRunner
 from agentbench.runtime import RuntimeFactory
 from agentbench.runtime.docker import DockerRuntime
 from agentbench.runtime.interception import (
+    CompositeTraceSink,
     NullTraceSink,
     OpenRouterProvider,
     TerminalTraceSink,
-    TraceEvent,
     TraceSink,
 )
 
@@ -32,7 +32,7 @@ def build_trace_suite_runner(
     if mode == "terminal":
         trace_output = getattr(activity_sink, "write_static", output_fn)
         sinks.append(TerminalTraceSink(trace_output))
-    sink: TraceSink = _CompositeTraceSink(tuple(sinks)) if sinks else NullTraceSink()
+    sink: TraceSink = CompositeTraceSink(tuple(sinks)) if sinks else NullTraceSink()
     runtime_factory = RuntimeFactory(
         docker_builder=lambda: DockerRuntime(
             model_provider=OpenRouterProvider(model=model),
@@ -44,11 +44,3 @@ def build_trace_suite_runner(
     benchmark_runner = BenchmarkRunner(agent_runner=agent_runner)
     return SuiteRunner(benchmark_runner=benchmark_runner)
 
-
-class _CompositeTraceSink:
-    def __init__(self, sinks: tuple[TraceSink, ...]) -> None:
-        self._sinks = sinks
-
-    def emit(self, event: TraceEvent) -> None:
-        for sink in self._sinks:
-            sink.emit(event)
