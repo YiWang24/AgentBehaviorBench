@@ -199,8 +199,8 @@ never changes the Registry, and it never reads `DEFUZEX_API_KEY`.
 | Phase | Question | Needs | Model replies | Egress | If it fails |
 | --- | --- | --- | --- | --- | --- |
 | 1. Preflight | Does this Agent run, and is its model traffic observable? | Docker only | Synthesized in the interceptor | Blocked | `FAIL` (exit `1`) |
-| 2. Provider check | Can this host grade the Agent at all? | `DEEPSEEK_API_KEY` | - | - | `PARTIAL` (exit `0`) |
-| 3. Benchmark | Does this Agent behave as its requirement says? | A live model | Real DeepSeek API | Open | `FAIL` (exit `1`) |
+| 2. Provider check | Can this host grade the Agent at all? | `DEEPSEEK_API_KEY`, plus the key of any other `--provider` | - | - | `PARTIAL` (exit `0`) |
+| 3. Benchmark | Does this Agent behave as its requirement says? | A live model | Real API of the chosen `--provider` | Open | `FAIL` (exit `1`) |
 
 The ordering is the point. Preflight needs no credential and starts the Agent's
 container itself, invoking the adapter directly rather than through an SDK Run —
@@ -231,7 +231,8 @@ container is started twice rather than shared.
 
 ```text
 agentbench verify [-h] [--env-file PATH] [--input TEXT] [--probes N]
-                  [--inputs N] [--model MODEL] [--provider-model MODEL]
+                  [--inputs N] [--provider {deepseek,openrouter}]
+                  [--model MODEL] [--provider-model MODEL]
                   [--output PATH] [--json]
                   [--llm-trace {off,terminal}]
                   [--llm-trace-max-bytes BYTES] agent_id
@@ -241,6 +242,7 @@ agentbench verify [-h] [--env-file PATH] [--input TEXT] [--probes N]
 python -m agentbench verify langgraph-customer-support-agent
 python -m agentbench verify swe-agent --probes 3
 python -m agentbench verify langgraph-chat-agent --inputs 5
+python -m agentbench verify email-assistant --provider openrouter
 python -m agentbench verify swe-agent --model deepseek-reasoner --llm-trace terminal
 ```
 
@@ -253,13 +255,33 @@ python -m agentbench verify swe-agent --model deepseek-reasoner --llm-trace term
 | `--input TEXT` | No | Short generic prompt | Preflight probe text, or `@PATH` to read it from a file. |
 | `--probes N` | No | `1` | Preflight probes to send. |
 | `--inputs N` | No | `3` | Inputs to generate for the graded benchmark. |
-| `--model MODEL` | No | `DEEPSEEK_MODEL` | Model the Agent talks to during the benchmark. Preflight always answers from the interceptor. |
-| `--provider-model MODEL` | No | `DEEPSEEK_MODEL` | Model that writes the Case and grades the Run. Independent of `--model`. |
+| `--provider {deepseek,openrouter}` | No | `deepseek` | Upstream the Agent's own traffic is routed to during the benchmark. |
+| `--model MODEL` | No | `DEEPSEEK_MODEL` or `OPENROUTER_MODEL` | Model the Agent talks to during the benchmark; which variable supplies the default follows `--provider`. Preflight always answers from the interceptor. |
+| `--provider-model MODEL` | No | `DEEPSEEK_MODEL` | Model that writes the Case and grades the Run. Independent of `--model` and of `--provider`. |
 | `--output PATH` | No | `results/verify-<agent_id>.jsonl` | Where to write the benchmark result log. Preflight writes no log. |
 | `--json` | No | Human report | Print one JSON summary and nothing else. |
 | `--llm-trace {off,terminal}` | No | `off` | Also dump every captured payload. Debugging only. |
 | `--llm-trace-max-bytes BYTES` | No | `262144` | Maximum captured bytes per request or response. |
 | `-h`, `--help` | No | - | Show `verify` help and exit. |
+
+`--provider` decides which upstream the Agent's rewritten traffic reaches, and
+that choice is constrained by the Agent rather than by preference. DeepSeek
+publishes only `/chat/completions` and rejects several `response_format` types,
+so an Agent whose manifest declares `openai-responses` or `anthropic-messages`
+cannot be routed there at all — the interceptor refuses rather than guess a
+translation. OpenRouter serves all three source protocols, so it is the answer
+when a Run fails at the router or comes back with `This response_format type is
+unavailable now`. The default stays on DeepSeek because it is the cheaper of the
+two and serves the majority of the registry.
+
+The provider decides which variables supply the Agent's own traffic, not what
+the host needs overall. `--provider openrouter` resolves `--model` and its
+credential against `OPENROUTER_MODEL` and `OPENROUTER_API_KEY`, but the Case and
+Judge Providers stay on DeepSeek either way — so a graded Run with
+`--provider openrouter` needs both `DEEPSEEK_API_KEY` and `OPENROUTER_API_KEY`.
+The provider check resolves them in that order, judge first and Agent second,
+before the graded Run starts, so a missing key or a bad model slug is named
+there rather than arriving as a 401 partway through.
 
 There is no flag for "preflight only": a host without a provider credential
 cannot reach the graded benchmark, so `verify <agent>` already stops there and
