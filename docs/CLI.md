@@ -32,6 +32,14 @@ environment. Before running a benchmark, make sure that:
 - The Agent is registered in `resources/registry.toml`, and its directory,
   `agent.toml`, and requirement file exist.
 
+### One Run at a Time
+
+The DefuzeX SDK enforces a single active Run per host with an operating-system
+file lock. A second `run`, `certify`, or `verify` started while another is still
+going fails with `RunAlreadyActiveError`, so batch these commands sequentially
+rather than in parallel. The lock file is resolved from `XDG_RUNTIME_DIR`, which
+is also how a test suite isolates itself from a Run happening on the same machine.
+
 Show root help with:
 
 ```powershell
@@ -44,7 +52,14 @@ Current subcommands:
 | --- | --- |
 | `run` | Run all enabled Agents whose status is `ready`. |
 | `view` | Open an existing JSONL result in the local web viewer. |
+| `verify` | Check one Agent as far as this host can: a credential-free preflight, then a graded benchmark with local Providers. |
 | `certify` | Verify one `adapting` Agent can complete its requested Cases and promote it to `ready`. |
+
+`verify` is the only command that runs without `DEFUZEX_API_KEY`: it supplies its
+own Case and Judge Providers instead of calling the DefuzeX Backend. Its first
+phase needs no credential and no network at all; only the graded benchmark that
+follows needs `DEEPSEEK_API_KEY`, and a host without one stops after preflight
+instead of failing. Use `verify` while adapting an Agent, before `certify`.
 
 ## 2. Default Command and Compatibility
 
@@ -174,9 +189,227 @@ Viewer action? [r rerun/q quit]:
 
 `Ctrl+C` or end-of-input also stops the viewer.
 
-## 4. `certify`
+## 4. `verify`
 
-### 4.1 Syntax
+### 4.1 What It Answers
+
+`verify` runs in one direction and stops at the first thing that is missing. It
+never changes the Registry, and it never reads `DEFUZEX_API_KEY`.
+
+| Phase | Question | Needs | Model replies | Egress | If it fails |
+| --- | --- | --- | --- | --- | --- |
+| 1. Preflight | Does this Agent run, and is its model traffic observable? | Docker only | Synthesized in the interceptor | Blocked | `FAIL` (exit `1`) |
+| 2. Provider check | Can this host grade the Agent at all? | `DEEPSEEK_API_KEY` | - | - | `PARTIAL` (exit `0`) |
+| 3. Benchmark | Does this Agent behave as its requirement says? | A live model | Real DeepSeek API | Open | `FAIL` (exit `1`) |
+
+The ordering is the point. Preflight needs no credential and starts the Agent's
+container itself, invoking the adapter directly rather than through an SDK Run —
+so an Agent stays checkable on a host where nothing else is configured. Only once
+the Agent has proven itself is the host asked whether it can grade it, and a host
+that cannot is not an Agent that failed.
+
+The benchmark phase then runs **the same flow as `certify`** — the Registry's
+Case count, a real model, an archived result log — with local Case and Judge
+Providers in place of the official services. Supplying both Provider ports is
+what selects the SDK's local mode, in which the SDK builds no Backend client at
+all. Everything else about the Run stays the SDK's: the same `create_run`, the
+same strict `get_input`/`submit` handshake, the same `TestReport`.
+
+The Case is generated from the Agent's requirement — its production scenario,
+the behaviors to test, and the prohibited ones — so the quality of a graded Run
+is bounded by how specific that file is. A requirement written from a template
+produces generic Cases.
+
+Preflight always sends `--probes` probes regardless of the Agent's `case` field,
+because it checks startup rather than coverage. The benchmark honors the declared
+count, the same way `run` and `certify` do.
+
+Because the two phases make opposite guarantees about the network, the Agent's
+container is started twice rather than shared.
+
+### 4.2 Syntax
+
+```text
+agentbench verify [-h] [--env-file PATH] [--input TEXT] [--probes N]
+                  [--inputs N] [--preflight-only] [--model MODEL]
+                  [--provider-model MODEL] [--output PATH] [--json]
+                  [--llm-trace {off,terminal}]
+                  [--llm-trace-max-bytes BYTES] agent_id
+```
+
+```powershell
+python -m agentbench verify langgraph-customer-support-agent
+python -m agentbench verify swe-agent --preflight-only --probes 3
+python -m agentbench verify langgraph-chat-agent --inputs 5
+python -m agentbench verify swe-agent --model deepseek-reasoner --llm-trace terminal
+```
+
+### 4.3 Arguments
+
+| Argument | Required | Default | Description |
+| --- | --- | --- | --- |
+| `agent_id` | Yes | - | Registered Agent ID. Disabled Agents and any `status` are accepted. |
+| `--env-file PATH` | No | Repository `.env` | Load host defaults from another dotenv file. |
+| `--input TEXT` | No | Short generic prompt | Preflight probe text, or `@PATH` to read it from a file. |
+| `--probes N` | No | `1` | Preflight probes to send. |
+| `--inputs N` | No | `3` | Inputs to generate for the graded benchmark. |
+| `--preflight-only` | No | Run all phases | Stop after preflight. Needs no credential. |
+| `--model MODEL` | No | `DEEPSEEK_MODEL` | Model the Agent talks to during the benchmark. Preflight always answers from the interceptor. |
+| `--provider-model MODEL` | No | `DEEPSEEK_MODEL` | Model that writes the Case and grades the Run. Independent of `--model`. |
+| `--output PATH` | No | `results/verify-<agent_id>.jsonl` | Where to write the benchmark result log. Preflight writes no log. |
+| `--json` | No | Human report | Print one JSON summary and nothing else. |
+| `--llm-trace {off,terminal}` | No | `off` | Also dump every captured payload. Debugging only. |
+| `--llm-trace-max-bytes BYTES` | No | `262144` | Maximum captured bytes per request or response. |
+| `-h`, `--help` | No | - | Show `verify` help and exit. |
+
+`--preflight-only` is the check to repeat while adapting an Agent: it is the
+cheapest phase and answers the only question that matters before the Agent runs
+at all.
+
+### 4.4 Agent Requirements
+
+| Condition | Behavior |
+| --- | --- |
+| `runtime.type = "docker"` and an `[llm_interception]` section | Verification runs. |
+| Any other runtime type | Refuse and exit `2`; no interceptor can observe an in-process Agent. |
+| No `[llm_interception]` section | Refuse and exit `2`; model calls could be neither captured nor served offline. |
+| Not registered | Refuse and exit `2`. |
+
+Secrets declared in `runtime.secret_env_keys` do not need real values. Missing
+ones are replaced with deterministic placeholders — shaped like the credential
+they replace, so an Agent that validates its key still starts — and the
+substituted names are printed, so a stub never passes silently.
+
+### 4.5 Verdict
+
+| Verdict | Exit | Means |
+| --- | --- | --- |
+| `PASS` | `0` | Every phase that ran held. |
+| `PARTIAL` | `0` | Preflight held; this host could not grade the Agent. |
+| `FAIL` | `1` | Preflight or the graded Run failed. |
+| `ERROR` | `2` | The caller pointed `verify` at something it cannot answer for. |
+
+`PARTIAL` shares an exit code with `PASS` on purpose: a missing provider key is a
+gap in the host's own setup, not a defect in the Agent, and a CI job without a
+credential must not go red for it. The report still names what was missing.
+
+Preflight passes when the image builds, the container starts, every probe returns
+non-empty output, and at least one complete `llm_request`/`llm_response` pair is
+captured. It never grades quality — the replies come from a local mock, so the
+Agent's wording carries no signal. An Agent whose reply is poor still passes
+preflight; one that returns nothing does not.
+
+The benchmark's verdict is the Judge's. Every Case must pass: an Agent that
+failed its first Case and passed its second has not passed. The SDK's own status
+is reported separately, as `judge:` in the report and
+`benchmark.sdk_judge_status` in the JSON, because the two answer different
+questions — the Judge grades the Run, while the verdict also required preflight
+to have held first.
+
+### 4.6 Report Layout
+
+One column of stages, split by the three questions the run asks in order, then
+the model traffic, the judgment, and the verdict. These are the same stage lines
+`certify` prints; on a terminal the running stage is a self-erasing live line.
+
+```text
+verify · langgraph-customer-support-agent
+       SDK local providers · no DefuzeX credentials · registry untouched
+
++ PREFLIGHT ------------------------------------------------------------+
+  synthesized model replies · egress blocked · no credentials
+  Starting Agent... OK | ContainerAgentAdapter | 2 routes
+  Probing Agent... OK | 1/1 answered
+  Capturing model traffic... OK | 2 request/response pairs
+
++ PROVIDER CHECK -------------------------------------------------------+
+  Checking local Case and Judge Providers... OK | judged by deepseek-chat
+  Checking the Agent's model target... OK | deepseek-chat
+
++ BENCHMARK ------------------------------------------------------------+
+  Generating Case with local Provider... OK | run=run_d9075725a90b41c
+  Running Agent inputs... OK | Judge: pass
+
+     01  ▸ Reply with a short confirmation that you received thi…
+         ◂ Tool: list_available_functions                  200 · 1.4ms
+
+  ✓  step_1          Answered within its declared scope.
+
+  PASS   1/1 cases · 2 model request/response pairs captured · judge: pass
+         log  results/verify-langgraph-customer-support-agent-20260828.jsonl
+```
+
+A run that stopped early prints only the sections it reached and leads with the
+reason. Call lists longer than ten are elided in the middle. Note that
+`captured_pairs` counts both phases, so a graded run includes its preflight
+probes.
+
+`--llm-trace terminal` adds a dump of every captured payload on top of the
+report. It is a debugging aid, not a verbosity level: an Agent that resends a
+long system prompt each turn produces hundreds of extra lines. Each printed
+payload is capped, but the capture itself is not — lowering
+`--llm-trace-max-bytes` far enough truncates request bodies mid-JSON, and the
+previews and result log degrade with it.
+
+### 4.7 Machine-Readable Output
+
+`--json` prints one document and suppresses every other line, grouped by the
+phase each fact came from, so how far the run got is readable without inferring
+it from nulls:
+
+```json
+{
+  "command": "verify",
+  "agent_id": "langgraph-customer-support-agent",
+  "verdict": "pass",
+  "preflight": {"probes_sent": 1, "probes_answered": 1},
+  "providers": {
+    "state": "ready",
+    "reason": null,
+    "provider_model": "deepseek-chat",
+    "agent_model": "deepseek-chat"
+  },
+  "benchmark": {
+    "ran": true,
+    "cases": {"completed": 1, "requested": 1},
+    "sdk_judge_status": "pass",
+    "summary": "Answered every prompt within its declared scope.",
+    "issues": [],
+    "step_results": [{"step_id": "step_1", "passed": true, "reason": "…"}]
+  },
+  "model_calls": {"captured_pairs": 2, "calls": [{"number": 1, "…": "…"}]},
+  "substituted_secrets": [],
+  "result_log": "results/verify-langgraph-customer-support-agent-20260828.jsonl",
+  "reason": null
+}
+```
+
+`providers.state` is `ready`, `unavailable`, or `skipped` — `unavailable` carries
+its reason, `skipped` means `--preflight-only`. `benchmark.ran` is `false` in
+both cases, and `result_log` is `null`, because only a graded Run is archived.
+
+### 4.8 Model Notes
+
+Neither phase's model source is selectable: preflight is always offline, which is
+what makes it free and hermetic, and the benchmark always uses a real provider,
+because grading synthesized replies would say nothing about the Agent.
+
+That has one consequence worth knowing. An Agent that cannot cope with the mock's
+constant replies — a graph that routes on reply content, or a framework that
+rejects a synthesized tool call — fails preflight and never reaches the
+benchmark, even though it would work against a live model. Preflight is a gate:
+for such an Agent the fix is on the Agent's side, or in the `[llm_interception]`
+routes describing a shape the mock can satisfy.
+
+DeepSeek serves only the OpenAI **chat** wire format. An Agent whose manifest
+routes `openai-responses` or `anthropic-messages` traffic cannot be graded
+against it, and an Agent requesting JSON-schema `response_format` currently gets
+`400 This response_format type is unavailable now`. Those are provider limits,
+not adapter defects: `--preflight-only` still verifies such an Agent.
+
+## 5. `certify`
+
+### 5.1 Syntax
 
 ```text
 agentbench certify [-h] [--env-file PATH] [--output PATH]
@@ -191,7 +424,7 @@ Most common invocation:
 python -m agentbench certify swe-agent
 ```
 
-### 4.2 Arguments
+### 5.2 Arguments
 
 | Argument | Required | Default | Description |
 | --- | --- | --- | --- |
@@ -217,7 +450,7 @@ python -m agentbench certify swe-agent `
   --output results\manual-swe-certification.json
 ```
 
-### 4.3 Allowed Registry States
+### 5.3 Allowed Registry States
 
 `certify` operates on one specified Agent only and does not run other Agents.
 
@@ -229,7 +462,7 @@ python -m agentbench certify swe-agent `
 | `enabled = false` | Refuse certification and exit with code `2`. |
 | Not registered | Refuse certification and exit with code `2`. |
 
-### 4.4 Full Certification Flow
+### 5.4 Full Certification Flow
 
 Certification uses the same trusted host flow as normal benchmarks:
 
@@ -259,7 +492,7 @@ The status update modifies only the target Agent's `status` line and preserves
 field order, comments, and other Agents in the Registry. The temporary file is
 created beside the Registry and is atomically replaced when complete.
 
-### 4.5 Why Certification Does Not Keep a Viewer Running
+### 5.5 Why Certification Does Not Keep a Viewer Running
 
 `certify` is designed to be callable by developers and CI in non-interactive
 contexts. It does not wait for `q` or `r` after completion, and it does not
@@ -273,9 +506,9 @@ python -m agentbench view `
   results\certify-swe-agent-20260820-162500.jsonl
 ```
 
-## 5. `view`
+## 6. `view`
 
-### 5.1 Syntax
+### 6.1 Syntax
 
 ```text
 agentbench view [-h] [--host HOST] [--port PORT] result_log
@@ -285,7 +518,7 @@ agentbench view [-h] [--host HOST] [--port PORT] result_log
 python -m agentbench view results\result-20260820-162500.jsonl
 ```
 
-### 5.2 Arguments
+### 6.2 Arguments
 
 | Argument | Required | Default | Description |
 | --- | --- | --- | --- |
@@ -316,7 +549,7 @@ Result log: <absolute-path>\result-20260820-162500.jsonl
 Press `Ctrl+C` to stop the server. A missing result path raises an error
 immediately and does not create an empty file.
 
-## 6. JSONL Results and Interruption Recovery
+## 7. JSONL Results and Interruption Recovery
 
 Result files are append-only event streams and may contain:
 
@@ -337,22 +570,25 @@ and errors remain viewable.
 Results may contain inputs, outputs, raw adapter state, and error messages.
 Review result files for sensitive data before sharing or submitting them.
 
-## 7. Exit Codes
+## 8. Exit Codes
 
 | Exit code | Commands | Meaning |
 | --- | --- | --- |
 | `0` | `run` | User cancelled, or all selected benchmarks passed. |
+| `0` | `verify` | `PASS` — every phase that ran held — or `PARTIAL`, where preflight held but this host could not grade the Agent. |
 | `0` | `certify` | Certification completed and promoted the Agent, completed with Judge failures but still promoted, or the Agent was already `ready`. |
 | `0` | `view` | Viewer stopped normally. |
 | `1` | `run` | No runnable ready Agents, shared configuration failed, or at least one benchmark failed. |
+| `1` | `verify` | The Agent failed to start, failed a probe, had no model call captured, or did not pass the graded Run. |
 | `1` | `certify` | Certification did not complete because of shared configuration, startup, runtime, or invocation failure. |
+| `2` | `verify` | Agent does not exist, does not use the Docker runtime, declares no `[llm_interception]`, or `--probes`/`--inputs` was below 1. |
 | `2` | `certify` | Agent does not exist, is disabled, has a disallowed state, or Registry update failed after certification completed. |
 | `2` | all commands | `argparse` detected an unknown command, unknown argument, or missing required argument. |
 
 Unhandled exceptions that are not converted by the CLI, such as a missing file
 for `view`, usually exit Python with a non-zero status and print the exception.
 
-## 8. FAQ
+## 9. FAQ
 
 ### Normal run did not generate JSONL or trace output
 
@@ -400,7 +636,7 @@ command, and `agent.toml`. AgentBench uses a read-only root filesystem and
 mounts `/tmp` as a fresh writable tmpfs for each run. See
 `How To Add Agent.md` for the full adaptation constraints.
 
-## 9. CLI Development Structure
+## 10. CLI Development Structure
 
 The CLI uses an explicit feature registry instead of hard-coding command
 branches in the root entry point:
@@ -410,16 +646,38 @@ agentbench/cli/
   main.py                 root parser and feature dispatch
   execution.py            shared benchmark execution and result writing
   presentation.py         terminal display and interaction
+  progress.py             the animated stage column, shared by certify and verify
   registry_status.py      Registry status updates
   result_export.py        append-only JSONL writer
+  trace_runtime.py        runner wiring for live provider traffic
+  verify_runtime.py       verify's two runtime stacks and shared trace sinks
+  verify_preflight.py     subject selection, and probing the Agent directly
+  verify_providers.py     what this host needs before it can grade an Agent
+  verify_report.py        sectioned verify report, judgment reading, JSON summary
   viewer.py               local HTTP viewer server
+  TerminalUI/
+    LLMactivity.py        self-erasing live panel for the current model call
+    call_log.py           completed calls retained for the final report
   features/
     base.py               CommandFeature contract
     __init__.py           FEATURES registry
     run.py                run arguments and workflow
     view.py               view arguments and workflow
+    verify.py             verify arguments and phase orchestration
     certify.py            certify arguments and workflow
+
+agentbench/harness/local/
+  case.py  judge.py  prompts.py  chat.py  suite.py
+                          the Case and Judge Providers verify supplies locally
+
+agentbench/runtime/contracts/
+  secrets.py              strict and placeholder-substituting secret resolvers
 ```
+
+Both `verify` phases deliberately keep `execution.py` untouched. Preflight never
+reaches it — it drives the adapter directly — and the benchmark's Provider
+arguments are injected by `LocalBenchmarkSuiteRunner` instead of widening the
+shared execution signature.
 
 When adding a subcommand:
 
