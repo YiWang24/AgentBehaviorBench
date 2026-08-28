@@ -12,7 +12,10 @@ import threading
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
+
+from agentbench.credential_shape import shaped
 
 from agentbench.adapter import AgentDescriptor
 from agentbench.runtime.agentcontainer import AgentContainerConfig
@@ -42,6 +45,12 @@ from .policy import DockerPolicy
 from .session import DockerSession
 
 
+CA_EXPORT_DIR_MODE = 0o777
+LOOPBACK_ADDRESS = "127.0.0.1"
+
+EgressMode = Literal["open", "blocked"]
+
+
 class DockerRuntimeError(RuntimeError):
     """Raised when an isolated Docker session cannot be started."""
 
@@ -59,9 +68,13 @@ class DockerRuntime:
         model_provider: ModelTargetProvider | None = None,
         trace_sink: TraceSink | None = None,
         trace_max_bytes: int = DEFAULT_TRACE_MAX_BYTES,
+        egress: EgressMode = "open",
     ) -> None:
         if trace_max_bytes < 1024:
             raise ValueError("trace_max_bytes must be at least 1024")
+        if egress not in ("open", "blocked"):
+            raise ValueError(f"Unsupported egress mode: {egress!r}")
+        self._egress = egress
         self._executable = executable
         self._environ = os.environ if environ is None else environ
         self._secret_resolver = secret_resolver or EnvironmentSecretResolver(
@@ -105,7 +118,7 @@ class DockerRuntime:
             if interception is not None:
                 trace_state = InterceptionTraceState()
                 self._require_non_root_image(image)
-                self._run("network", "create", network_name)
+                self._run("network", "create", *self._network_options(), network_name)
                 created_network = True
                 interceptor, token_environment = self._start_interceptor(
                     agent_id=config.agent_id,
@@ -224,6 +237,12 @@ class DockerRuntime:
         config_file = secret_dir / "interceptor_config.json"
         ca_dir = secret_dir / "ca"
         ca_dir.mkdir()
+        # The interceptor runs as container root under a cap-drop=ALL policy, so it
+        # holds no CAP_DAC_OVERRIDE and cannot create its CA inside a directory owned
+        # by the host user. Docker Desktop hides this by faking bind-mount ownership;
+        # native Linux Docker does not. The parent mkdtemp stays 0700, so widening
+        # only this directory keeps the exported CA private on the host.
+        ca_dir.chmod(CA_EXPORT_DIR_MODE)
         ca_certificate = ca_dir / "mitmproxy-ca-cert.pem"
         token_environment: dict[str, str] = {}
         credentials: list[dict[str, object]] = []
@@ -233,7 +252,10 @@ class DockerRuntime:
         target_secret_file.write_text(upstream_secret, encoding="utf-8")
 
         for credential in interception.credentials:
-            token = secrets.token_urlsafe(32)
+            # Shaped like the credential it stands in for: an Agent that guards
+            # on key format would otherwise reject the token before making a
+            # single call. The random body is unchanged.
+            token = shaped(credential.agent_env, secrets.token_urlsafe(32))
             token_file = secret_dir / f"{credential.credential_id}.token"
             token_file.write_text(token, encoding="utf-8")
             token_environment[credential.agent_env] = token
@@ -286,6 +308,7 @@ class DockerRuntime:
                 container_name,
                 "--network",
                 network_name,
+                *self._host_alias_arguments(interception),
                 *self._interceptor_policy.run_arguments(),
                 "--mount",
                 _bind_mount(config_file, "/run/secrets/interceptor_config"),
@@ -322,6 +345,30 @@ class DockerRuntime:
             ),
             token_environment,
         )
+
+    def _network_options(self) -> tuple[str, ...]:
+        """Cut the egress network off when the caller requires isolation."""
+
+        return ("--internal",) if self._egress == "blocked" else ()
+
+    def _host_alias_arguments(
+        self, interception: InterceptionConfig
+    ) -> tuple[str, ...]:
+        """Point intercepted hosts at loopback so no route leaves the namespace.
+
+        An isolated network carries no default route, so a non-loopback placeholder
+        address fails the kernel route lookup with ENETUNREACH before the nat OUTPUT
+        REDIRECT can hand the connection to the interceptor. Loopback is always
+        routable, and the agent container inherits these aliases because Docker
+        shares ``/etc/hosts`` with containers joining via ``--network container:``.
+        """
+
+        if self._egress != "blocked":
+            return ()
+        arguments: list[str] = []
+        for host in _literal_route_hosts(interception):
+            arguments.extend(("--add-host", f"{host}:{LOOPBACK_ADDRESS}"))
+        return tuple(arguments)
 
     def _follow_trace(
         self, container_name: str, trace_state: InterceptionTraceState
@@ -437,6 +484,21 @@ class DockerRuntime:
             )
         except FileNotFoundError:
             return None
+
+
+def _literal_route_hosts(interception: InterceptionConfig) -> tuple[str, ...]:
+    """Return intercepted hosts that can be written into ``/etc/hosts``.
+
+    Wildcard patterns have no single name to alias, so they are skipped; traffic to
+    them simply fails to resolve, which is the intended isolated-mode behavior.
+    """
+
+    hosts: list[str] = []
+    for route in interception.routes:
+        for pattern in route.host_patterns:
+            if "*" not in pattern and pattern not in hosts:
+                hosts.append(pattern)
+    return tuple(hosts)
 
 
 def _bind_mount(source: Path, target: str) -> str:
