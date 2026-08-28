@@ -2,6 +2,7 @@
 
 from .providers import (
     CaseGenerationContext,
+    CaseLike,
     HistoryItemLike,
     JudgeContext,
     SubmissionLike,
@@ -10,6 +11,7 @@ from .sdk import SDKReport, SDKRun, SDKRunFactory, SDKTestInput
 
 __all__ = [
     "CaseGenerationContext",
+    "CaseLike",
     "HistoryItemLike",
     "JudgeContext",
     "SDKReport",
