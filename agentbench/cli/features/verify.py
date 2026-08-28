@@ -374,25 +374,29 @@ def _build_report(
     """Turn the suite outcome into a startup verdict."""
 
     result = execution.result
-    log_path = (
-        execution.result_log.path
-        if keep_artifacts and execution.result_log is not None
-        else None
-    )
-    common: dict[str, object] = {
-        "agent_id": agent_id,
-        "captured_pairs": offline.captured_pair_count,
-        "substituted_secrets": offline.substituted_secrets,
-        "result_log": log_path,
-        "calls": offline.calls,
-        "model_source": offline.model_source,
-        "model": offline.model,
-        "mode": offline.mode,
-        "provider_model": offline.provider_model,
-    }
     item = _agent_item(result, agent_id)
+    # Built once as a passing report and narrowed with `replace` below. A dict of
+    # shared keyword arguments would be untyped at every construction site, which
+    # is exactly where a missing or misspelled field should be caught.
+    report = VerifyReport(
+        agent_id=agent_id,
+        verdict=PASS,
+        captured_pairs=offline.captured_pair_count,
+        substituted_secrets=offline.substituted_secrets,
+        result_log=(
+            execution.result_log.path
+            if keep_artifacts and execution.result_log is not None
+            else None
+        ),
+        calls=offline.calls,
+        model_source=offline.model_source,
+        model=offline.model,
+        mode=offline.mode,
+        provider_model=offline.provider_model,
+    )
     if item is not None:
-        common.update(
+        report = replace(
+            report,
             completed_cases=item.completed_case_count,
             requested_cases=item.requested_case_count,
             judge_status=_judge_status(item),
@@ -403,31 +407,26 @@ def _build_report(
         reason = "Agent did not complete startup"
         if item is not None and item.error_type is not None:
             reason = f"{item.error_type}: {item.error_message}"
-        return VerifyReport(
-            verdict=FAIL,
-            reason=reason,
-            **common,  # type: ignore[arg-type]
-        )
+        return replace(report, verdict=FAIL, reason=reason)
 
     # The SDK, not this command, decides whether the Run satisfied its Case. A
     # local Judge still answers only the startup question, but it answers it
     # through the same report contract an official Judge would use.
     judgment = _judge_rejection(item)
     if judgment is not None:
-        return VerifyReport(
-            verdict=FAIL,
-            reason=judgment,
-            **common,  # type: ignore[arg-type]
-        )
+        return replace(report, verdict=FAIL, reason=judgment)
 
     if offline.captured_pair_count < 1:
-        return VerifyReport(
+        return replace(
+            report,
             verdict=FAIL,
-            reason="Agent ran but no model call was captured, so its LLM traffic is not observable",
-            **common,  # type: ignore[arg-type]
+            reason=(
+                "Agent ran but no model call was captured, so its LLM traffic "
+                "is not observable"
+            ),
         )
 
-    return VerifyReport(verdict=PASS, **common)  # type: ignore[arg-type]
+    return report
 
 
 def _judgment_detail(item: SuiteAgentResult) -> dict[str, object]:
@@ -485,10 +484,9 @@ def _judge_status(item: SuiteAgentResult) -> str | None:
     ]
     if not statuses:
         return None
-    for status in statuses:
-        if status != STATUS_PASS:
-            return status
-    return STATUS_PASS
+    return next(
+        (status for status in statuses if status != STATUS_PASS), STATUS_PASS
+    )
 
 
 def _judge_rejection(item: SuiteAgentResult) -> str | None:
