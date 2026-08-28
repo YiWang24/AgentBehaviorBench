@@ -29,7 +29,7 @@ from agentbench.runtime.interception import (
 )
 
 DEFAULT_TIMEOUT = 180.0
-DEFAULT_MAX_TOKENS = 4096
+DEFAULT_MAX_TOKENS = 8192
 RETRY_DELAYS = (2.0, 6.0)
 
 
@@ -40,6 +40,17 @@ class LocalProviderError(ProviderError):
     and ``Run.judge`` re-raise ``DefuzeError`` untouched but collapse every other
     exception into a bare "The custom Provider failed", which would hide exactly
     the detail needed to fix a bad requirement or a rejected model request.
+    """
+
+
+class TransientProviderError(LocalProviderError):
+    """A local Provider call failed in a way a fresh attempt can fix.
+
+    A truncated or malformed reply is this roll of the model misbehaving, not a
+    rejected request: generation runs at a non-zero temperature, so the next
+    attempt re-rolls. Keeping these apart from an HTTP rejection is what lets the
+    retry loop re-raise permanent failures immediately while still retrying the
+    transient ones.
     """
 
 
@@ -91,8 +102,10 @@ class ChatModel:
         """Return the model's reply parsed as a JSON object.
 
         Case generation and judging each happen once per Run, so a transient
-        network failure would waste the whole Run; the call is retried rather
-        than surfaced as an Agent failure.
+        failure would waste the whole Run; the call is retried rather than
+        surfaced as an Agent failure. That covers the network, and equally a
+        reply that arrives truncated or unparseable — re-rolling costs one call,
+        while giving up costs the Run and reads as if the Agent were at fault.
         """
 
         body = json.dumps(
@@ -116,8 +129,11 @@ class ChatModel:
             if attempt:
                 time.sleep(RETRY_DELAYS[attempt - 1])
             try:
-                return _decode(self._post(body))
+                return _decode(self._post(body, max_tokens=max_tokens))
+            except TransientProviderError as exc:
+                last_error = exc
             except LocalProviderError:
+                # A rejected request will be rejected identically on every retry.
                 raise
             except Exception as exc:  # noqa: BLE001 - retried and re-raised below
                 last_error = exc
@@ -125,7 +141,7 @@ class ChatModel:
             f"The local Provider model call failed: {last_error}"
         ) from last_error
 
-    def _post(self, body: bytes) -> str:
+    def _post(self, body: bytes, *, max_tokens: int) -> str:
         request = urllib.request.Request(
             f"{self.base_url}/chat/completions",
             data=body,
@@ -146,10 +162,22 @@ class ChatModel:
             ) from exc
         choices = payload.get("choices")
         if not isinstance(choices, list) or not choices:
-            raise LocalProviderError("The local Provider model returned no choices")
-        content = choices[0].get("message", {}).get("content")
+            raise TransientProviderError(
+                "The local Provider model returned no choices"
+            )
+        choice = choices[0]
+        content = choice.get("message", {}).get("content")
         if not isinstance(content, str) or not content.strip():
-            raise LocalProviderError("The local Provider model returned empty content")
+            raise TransientProviderError(
+                "The local Provider model returned empty content"
+            )
+        if choice.get("finish_reason") == "length":
+            # Reported here rather than left to the JSON parser, which would
+            # otherwise blame the shape of a reply that is merely unfinished.
+            raise TransientProviderError(
+                f"The local Provider model reached its {max_tokens}-token ceiling "
+                "before finishing its JSON"
+            )
         return content
 
 
@@ -161,11 +189,13 @@ def _decode(content: str) -> dict:
     try:
         value = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise LocalProviderError(
+        raise TransientProviderError(
             f"The local Provider model did not return JSON: {text[:200]}"
         ) from exc
     if not isinstance(value, dict):
-        raise LocalProviderError("The local Provider model returned a non-object")
+        raise TransientProviderError(
+            "The local Provider model returned a non-object"
+        )
     return value
 
 
@@ -174,4 +204,5 @@ __all__ = [
     "DEFAULT_TIMEOUT",
     "ChatModel",
     "LocalProviderError",
+    "TransientProviderError",
 ]

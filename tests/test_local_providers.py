@@ -12,6 +12,8 @@ from agentbench.harness.local import (
     LocalJudgeProvider,
     LocalProviderError,
 )
+from agentbench.harness.local import chat as chat_module
+from agentbench.harness.local.chat import ChatModel
 from agentbench.harness.local.judge import INSUFFICIENT, ISSUE, PASS
 
 SECTIONS = {
@@ -285,3 +287,102 @@ class TestLocalJudgeProvider:
 
         assert "truncated" in model.prompts[0]
         assert len(model.prompts[0]) < 20_000
+
+
+class TestChatModelRetries:
+    """Which failures earn a second attempt, and which are final.
+
+    The distinction matters because Case generation happens once per Run: a
+    reply that merely arrived unfinished used to end the Run and be reported as
+    an Agent failure.
+    """
+
+    @staticmethod
+    def _model() -> ChatModel:
+        return ChatModel(api_key="k", model="m", base_url="https://example.invalid")
+
+    @pytest.fixture(autouse=True)
+    def _no_backoff(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(chat_module.time, "sleep", lambda _: None)
+
+    def _replies(
+        self, monkeypatch: pytest.MonkeyPatch, *replies: str | Exception
+    ) -> list[int]:
+        """Serve ``replies`` to successive _post calls, counting them."""
+
+        calls: list[int] = []
+        pending = list(replies)
+
+        def fake_post(_self: ChatModel, _body: bytes, *, max_tokens: int) -> str:
+            calls.append(max_tokens)
+            reply = pending.pop(0) if pending else pending_last
+            if isinstance(reply, Exception):
+                raise reply
+            return reply
+
+        pending_last = replies[-1] if replies else ""
+        monkeypatch.setattr(ChatModel, "_post", fake_post)
+        return calls
+
+    def test_a_truncated_reply_is_retried(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = self._replies(monkeypatch, '{"steps": [{"pro', '{"steps": []}')
+        assert self._model().json_object(system="s", user="u") == {"steps": []}
+        assert len(calls) == 2
+
+    def test_a_rejected_request_is_not_retried(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rejected = LocalProviderError("The local Provider model returned HTTP 400: no")
+        calls = self._replies(monkeypatch, rejected)
+        with pytest.raises(LocalProviderError, match="HTTP 400"):
+            self._model().json_object(system="s", user="u")
+        assert len(calls) == 1
+
+    def test_a_reply_that_never_parses_keeps_the_detail(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = self._replies(monkeypatch, '{"steps": [{"pro')
+        with pytest.raises(LocalProviderError, match="did not return JSON"):
+            self._model().json_object(system="s", user="u")
+        assert len(calls) == len(chat_module.RETRY_DELAYS) + 1
+
+    def test_the_token_ceiling_is_named_rather_than_blamed_on_the_shape(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        payload = {
+            "choices": [
+                {"message": {"content": '{"steps": [{"pro'}, "finish_reason": "length"}
+            ]
+        }
+        monkeypatch.setattr(
+            chat_module.urllib.request, "urlopen", _urlopen_returning(payload)
+        )
+        with pytest.raises(LocalProviderError, match="token ceiling"):
+            self._model().json_object(system="s", user="u")
+
+    def test_the_ceiling_leaves_room_for_a_multi_step_case(self) -> None:
+        # 4096 truncated real Case generations; the model's own limit is 8192.
+        assert chat_module.DEFAULT_MAX_TOKENS == 8192
+
+
+def _urlopen_returning(payload: dict[str, Any]):
+    """A urlopen stand-in yielding ``payload`` as the response body."""
+
+    class _Response:
+        def __enter__(self) -> "_Response":
+            return self
+
+        def __exit__(self, *_: Any) -> None:
+            return None
+
+        def read(self) -> bytes:
+            import json as _json
+
+            return _json.dumps(payload).encode("utf-8")
+
+    def _urlopen(_request: Any, timeout: float | None = None) -> _Response:
+        return _Response()
+
+    return _urlopen
