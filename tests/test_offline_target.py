@@ -784,6 +784,22 @@ def test_a_declared_tool_wins_over_a_prompt_example() -> None:
     assert body["choices"][0]["finish_reason"] == "tool_calls"
 
 
+def test_text_response_format_still_gets_ordinary_text() -> None:
+    """``{"type": "text"}`` asks for no JSON at all.
+
+    Only ``json_schema`` and ``json_object`` describe a JSON contract. Treating
+    every other ``response_format`` as one hands the Agent a literal ``{}`` where
+    it expected prose.
+    """
+
+    payload = {
+        "model": "gpt-4o",
+        "response_format": {"type": "text"},
+        "messages": [{"role": "user", "content": "Say hello."}],
+    }
+    assert _reply(payload)["choices"][0]["message"]["content"] == OFFLINE_TEXT
+
+
 def test_non_streaming_request_still_gets_json() -> None:
     body = _reply({"messages": [{"role": "user", "content": "hi"}]})
 
@@ -939,6 +955,39 @@ class TestJsonObjectExampleRanking:
         }
         reply = json.loads(_reply(payload)["choices"][0]["message"]["content"])
         assert reply == {"a": "1", "b": "2"}
+
+    def test_a_pretty_printed_example_is_recovered_whole(self):
+        """A padded example must not be mistaken for loose trailing pairs.
+
+        The exclusion window comes from where the object actually sat in the
+        prompt. Deriving it from ``json.dumps`` of the parsed object stops short
+        of any alignment whitespace, leaving the object's own last pairs to be
+        re-harvested as a shorter "loose" candidate that then wins on position.
+        """
+
+        payload = {
+            "model": "gpt-4o",
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {
+                    "role": "user",
+                    "content": (
+                        "Reply in json using this format:\n"
+                        "{\n"
+                        '    "next_agent"      : "planner",\n'
+                        '    "reasoning"       : "why you picked it",\n'
+                        '    "is_final_answer" : false\n'
+                        "}\n"
+                    ),
+                }
+            ],
+        }
+        reply = json.loads(_reply(payload)["choices"][0]["message"]["content"])
+        assert reply == {
+            "next_agent": "planner",
+            "reasoning": "why you picked it",
+            "is_final_answer": False,
+        }
 
     def test_later_braced_example_wins_over_earlier_one(self):
         payload = {
