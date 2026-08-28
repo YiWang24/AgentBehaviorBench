@@ -29,6 +29,7 @@ class ProgressPrinter:
     ) -> None:
         self._output_fn = output_fn
         self._llm_activity = llm_activity
+        self._provider_mode: str | None = None
         self._active_label: str | None = None
         self._animation_interval = animation_interval
         self._stop_animation = Event()
@@ -41,8 +42,10 @@ class ProgressPrinter:
         )
 
     def __call__(self, event: BenchmarkProgress) -> None:
+        if event.stage == "case_generation" and event.detail:
+            self._provider_mode = event.detail
         if event.status == "started":
-            self._start_stage(_stage_label(event))
+            self._start_stage(_stage_label(event, self._provider_mode))
             return
 
         status = "OK" if event.status == "succeeded" else "FAILED"
@@ -120,15 +123,19 @@ def configuration_error(message: object) -> str:
     return f"{ANSI_RED}【Configuration error】 {message}{ANSI_RESET}"
 
 
-def _stage_label(event: BenchmarkProgress) -> str:
+def _stage_label(event: BenchmarkProgress, provider_mode: str | None = None) -> str:
     if event.stage == "sdk_check":
-        return "Checking DefuzeX SDK configuration..."
+        # The provider mode is only known once this stage reports back, so the
+        # label has to stay true for both official and local runs.
+        return "Checking benchmark configuration..."
     if event.stage == "agent_start":
         return "Starting Agent..."
     if event.stage == "case_generation":
         if event.detail == "official":
             return "Generating Case from DefuzeX Server..."
         return "Generating Case with local Provider..."
+    if provider_mode == "local":
+        return "Running Agent inputs..."
     return "Running Agent inputs and DefuzeX Judge..."
 
 

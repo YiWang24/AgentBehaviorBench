@@ -73,6 +73,12 @@ class LLMActivity:
         self._call_count = 0
         self._rendered_line_count = 0
 
+    @property
+    def live(self) -> bool:
+        """Whether this panel redraws itself, i.e. owns the terminal."""
+
+        return self._live_updates
+
     def start_stage(self, label: str) -> None:
         """Start the benchmark stage line and its shared animation loop."""
 
@@ -124,7 +130,7 @@ class LLMActivity:
 
         with self._lock:
             if event.event == "llm_request":
-                preview = _event_preview(event, self._preview_chars)
+                preview = event_preview(event, self._preview_chars)
                 self._call_count += 1
                 self._calls[call_id] = _CallActivity(
                     call_id=call_id,
@@ -135,10 +141,8 @@ class LLMActivity:
                 )
                 self._latest_call_id = call_id
                 if not self._live_updates:
-                    call = self._calls[call_id]
-                    self._output_fn(self._call_header(call))
-                    self._output_fn(f"      Agent > {preview}")
-                    self._output_fn(f"      {self._model_text(call)}")
+                    # A pipe or log file cannot redraw, so the in-flight state is
+                    # skipped entirely and only the completed call is written once.
                     return
             else:
                 call = self._calls.get(call_id)
@@ -154,7 +158,7 @@ class LLMActivity:
                     self._calls[call_id] = call
                 self._latest_call_id = call_id
                 if event.event == "llm_response":
-                    call.response_preview = _event_preview(
+                    call.response_preview = event_preview(
                         event, self._preview_chars
                     )
                     call.status = event.data.get("status")
@@ -165,8 +169,8 @@ class LLMActivity:
                         self._preview_chars,
                     )
                 if not self._live_updates:
-                    self._output_fn(self._call_header(call))
-                    self._output_fn(f"      {self._model_text(call)}")
+                    for line in self._completed_call_lines(call):
+                        self._output_fn(line)
                     return
 
             if self._stage_label is not None:
@@ -269,6 +273,29 @@ class LLMActivity:
             f"{state}{concurrent}"
         )
 
+    def _completed_call_lines(self, call: _CallActivity) -> tuple[str, ...]:
+        """One block per finished call, for output that cannot be redrawn.
+
+        A log or pipe keeps every line, so the in-flight header and the
+        ``waiting`` placeholder are dropped and each call is written once, with
+        both directions intact.
+        """
+
+        latency = (
+            f"{float(call.latency_ms):.1f}ms"
+            if isinstance(call.latency_ms, (int, float))
+            else "-"
+        )
+        status = "FAILED" if call.error else (
+            str(call.status) if call.status is not None else "done"
+        )
+        return (
+            f"    LLM call {call.call_number:02d} | {call.provider} | "
+            f"{status} | {latency}",
+            f"      Agent > {call.request_preview}",
+            f"      {self._model_text(call)}",
+        )
+
     def _model_text(self, call: _CallActivity) -> str:
         if call.error is not None:
             return f"Model < FAILED: {call.error}"
@@ -306,7 +333,7 @@ class LLMActivity:
         self._stage_frame = 0
 
 
-def _event_preview(event: TraceEvent, limit: int) -> str:
+def event_preview(event: TraceEvent, limit: int) -> str:
     payload = event.data.get("payload")
     if event.event == "llm_request":
         text = _request_text(payload)
@@ -440,4 +467,4 @@ def _normalize(text: str) -> str:
     return " ".join(text.split())
 
 
-__all__ = ["LLMActivity", "PREVIEW_CHAR_LIMIT"]
+__all__ = ["LLMActivity", "PREVIEW_CHAR_LIMIT", "event_preview"]
