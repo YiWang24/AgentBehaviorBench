@@ -213,7 +213,9 @@ Judge Provider itself, which selects the SDK's **local Provider mode**. With a
 custom pair the SDK builds no Backend client at all, so no credential is resolved
 and no request leaves the process.
 
-### 4.2 How Benchmark Mode Generates Its Cases
+### 4.2 How Benchmark Mode Works
+
+#### Where the Cases come from
 
 The official service receives three requirement sections and returns test prompts.
 Benchmark mode sends the same three to a local model and gets the same thing back:
@@ -242,6 +244,105 @@ it. A local Case publishes it, because that is the only channel a local Judge ha
 The quality of the generated Cases is therefore bounded by those three sections.
 A requirement written from a template produces generic Cases; a specific one
 produces Cases that actually discriminate.
+
+#### Execution order
+
+Two orderings surprise people reading the code: the Agent container starts
+**before** the Case is generated, and the single-active-Run lock is released
+**before** judging begins.
+
+```text
+verify --mode benchmark <agent_id>
+
+  0  parse args, load .env
+     --inputs defaults to 3; --model-source is forced to a live provider
+
+  1  preflight — nothing is built yet
+     registry.find(agent_id, enabled_only=False)
+     runtime.type must be "docker", [llm_interception] must be declared
+
+  2  assemble
+     DeepSeekProvider.resolve()      a missing key stops the run right here
+     ChatModel.from_environment()    the model that writes and grades Cases
+
+  3  suite
+     new_suite_id()  ·  log: run_started
+     validate_defuzex()  ->  provider_mode "local"
+
++-- per Case · repeated `case` times, from the registry -----------------+
+
+  4a agent_runner.start()
+       build agent image, build interceptor image
+       create network
+       start interceptor, then agent sharing its netns
+       iptables nat OUTPUT REDIRECT  ·  CA injected per trust_plugin
+
+  4b create_run()                                     <- the SDK takes over
+       ContainerRunLock.acquire()          one active Run per host
+       parse_requirement()                 -> the three behavior sections
+       LocalCaseProvider.generate_case()   --> (1) model: generate N prompts
+       normalize_case()                    -> Case      state = ready
+
+     +-- per Input · repeated N times --------------------------------+
+
+  4c   get_input(full=True)                        state -> input_delivered
+       log: step_started
+       running.invoke(payload)             --> agent container
+         agent calls api.openai.com
+         /etc/hosts + iptables            --> interceptor
+         interceptor rewrites host, path, model
+                                           --> (2) model: the Agent's answer
+         <-- output
+       submit(output)                      state -> submitting -> ready
+       log: step_completed
+
+     +----------------------------------------------------------------+
+
+  4d on the last submit
+       _finish_runtime()      <- the Run lock is released HERE, before judging
+                                                    state -> judging
+       LocalJudgeProvider.judge()
+         rubric from the Case + the transcript
+                                           --> (3) model: the verdict
+       normalize_report()                  -> TestReport  state -> report_ready
+       log: agent_completed
+
++-----------------------------------------------------------------------+
+
+  5  log: suite_completed
+     _build_report()   every Case must pass, not only the last one
+     print_report() or --json
+```
+
+#### Which model calls are the Agent's
+
+Three kinds of request reach the provider, and only one of them is the Agent
+behaving. The other two are the harness reasoning about the Agent from outside
+its container, so they never pass through the Interceptor and are never counted
+as captured traffic:
+
+| Call | Runs on | Through the Interceptor | In `captured_pairs` |
+| --- | --- | --- | --- |
+| (1) generate the Case | Host | No | No |
+| (2) the Agent's answer | Container | Yes | **Yes** |
+| (3) judge the Run | Host | No | No |
+
+An Agent declaring `case = 2` run with `--inputs 3` therefore issues
+`2 × (1 + 3 + 1) = 10` provider requests, and its report shows `6` captured
+pairs. A count that included Case generation and judging would be describing the
+harness, not the Agent.
+
+#### What startup mode changes
+
+Exactly three steps, and nothing else. Container orchestration, the Interceptor,
+the handshake loop, the SDK state machine, and the result log events are the same
+in both modes.
+
+| Step | `startup` | `benchmark` |
+| --- | --- | --- |
+| 4a network | `--internal`, plus `--add-host <host>:127.0.0.1` | Normal egress |
+| 4b Case | A fixed probe; no model call | Generated; call (1) |
+| 4d Judge | Was every Input answered; no model call | Graded; call (3) |
 
 ### 4.3 Model Sources
 
