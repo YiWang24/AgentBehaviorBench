@@ -13,7 +13,6 @@ from agentbench.cli.verify_report import (
     PARTIAL,
     PASS,
     PROVIDERS_READY,
-    PROVIDERS_SKIPPED,
     PROVIDERS_UNAVAILABLE,
     VerifyReport,
     print_report,
@@ -185,27 +184,6 @@ def test_a_single_captured_pair_is_not_pluralized() -> None:
     print_report(_graded(), output.append)
 
     assert "1 model request/response pair captured" in _verdict(output, "PASS")
-
-
-def test_a_preflight_only_pass_says_so_instead_of_claiming_cases() -> None:
-    """Nothing was graded, so the verdict must not read like a benchmark result."""
-
-    output: list[str] = []
-    report = VerifyReport(
-        agent_id="demo",
-        verdict=PASS,
-        providers=PROVIDERS_SKIPPED,
-        probes_sent=2,
-        probes_answered=2,
-        captured_pairs=3,
-    )
-
-    print_report(report, output.append)
-
-    verdict = _verdict(output, "PASS")
-    assert "preflight only" in verdict
-    assert "2/2 probes answered" in verdict
-    assert "cases" not in verdict
 
 
 def test_a_partial_verdict_names_what_the_host_was_missing() -> None:

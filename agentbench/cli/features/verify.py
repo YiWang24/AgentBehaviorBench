@@ -42,7 +42,6 @@ from agentbench.cli.verify_report import (
     PARTIAL,
     PASS,
     PROVIDERS_READY,
-    PROVIDERS_SKIPPED,
     PROVIDERS_UNAVAILABLE,
     VerifyReport,
     print_header,
@@ -101,14 +100,6 @@ def configure_parser(parser: ArgumentParser) -> None:
         help=(
             "Inputs to generate for the graded benchmark. Defaults to "
             f"{DEFAULT_INPUT_COUNT}."
-        ),
-    )
-    parser.add_argument(
-        "--preflight-only",
-        action="store_true",
-        help=(
-            "Stop after preflight. Needs no credential, so this is the check to "
-            "repeat while adapting an Agent."
         ),
     )
 
@@ -176,7 +167,6 @@ def execute(args: Namespace) -> int:
             ),
             model=args.model,
             provider_model=args.provider_model,
-            preflight_only=args.preflight_only,
             llm_trace=args.llm_trace,
             llm_trace_max_bytes=args.llm_trace_max_bytes,
         ),
@@ -296,8 +286,6 @@ def _run_phases(
     base = _base_report(subject.agent_id, runtime, preflight)
     if not preflight.passed:
         return replace(base, verdict=FAIL)
-    if options.preflight_only:
-        return replace(base, verdict=PASS, providers=PROVIDERS_SKIPPED)
 
     print_section("PROVIDER CHECK", PROVIDER_NOTE, stage_output)
     check = check_providers(options, environ=runtime.environ, stages=stages)

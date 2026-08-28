@@ -82,7 +82,7 @@ def _agent_model(options: VerifyOptions, environ: Mapping[str, str]) -> str:
     if not environ.get(target.credential_env, "").strip():
         raise RuntimeError(
             f"A graded benchmark needs {target.credential_env}. Set it in the "
-            "environment or .env, or pass --preflight-only."
+            "environment or .env."
         )
     return target.model
 

@@ -14,7 +14,6 @@ from agentbench.cli.presentation import ANSI_PATTERN
 from agentbench.cli.TerminalUI.call_log import CallRecord, CallRecorder
 from agentbench.cli.verify_report import (
     PROVIDERS_READY,
-    PROVIDERS_SKIPPED,
     PROVIDERS_UNAVAILABLE,
 )
 from agentbench.cli.verify_runtime import VerifyOptions
@@ -236,7 +235,6 @@ def test_cli_dispatches_the_remaining_options(monkeypatch) -> None:
             "test-agent",
             "--input",
             "ping",
-            "--preflight-only",
             "--model",
             "deepseek-reasoner",
             "--provider-model",
@@ -254,7 +252,6 @@ def test_cli_dispatches_the_remaining_options(monkeypatch) -> None:
         probe_text="ping",
         model="deepseek-reasoner",
         provider_model="deepseek-chat",
-        preflight_only=True,
         llm_trace="terminal",
         llm_trace_max_bytes=4096,
     )
@@ -325,8 +322,9 @@ def test_preflight_probes_the_agent_the_requested_number_of_times(
 ) -> None:
     adapter = _FakeAdapter()
     runtime = _runtime(
-        options=VerifyOptions(probe_count=3, probe_text="ping", preflight_only=True),
+        options=VerifyOptions(probe_count=3, probe_text="ping"),
         adapter=adapter,
+        environ={},
     )
 
     _run(repo_root, runtime)
@@ -334,32 +332,19 @@ def test_preflight_probes_the_agent_the_requested_number_of_times(
     assert adapter.invocations == ["ping", "ping", "ping"]
 
 
-def test_preflight_never_touches_the_sdk_or_the_benchmark_stack(
+def test_preflight_runs_before_anything_the_host_might_be_missing(
     repo_root: Path,
 ) -> None:
-    """A missing SDK must not stop an Agent from being checked."""
+    """The Agent is checked first, so a host gap cannot mask its result."""
 
-    runtime = _runtime(options=VerifyOptions(preflight_only=True))
+    runtime = _runtime(environ={})
 
     exit_code, output = _run(repo_root, runtime)
 
     assert exit_code == 0
+    assert runtime.agent_runner.starts == 1
     assert runtime.suites_built == 0
-    assert not any("PROVIDER CHECK" in _plain(line) for line in output)
-
-
-def test_a_preflight_only_pass_reports_probes_rather_than_cases(
-    repo_root: Path,
-) -> None:
-    options = VerifyOptions(probe_count=2, preflight_only=True)
-    runtime = _runtime(options=options, pairs=2)
-
-    exit_code, output = _run(repo_root, runtime)
-
-    assert exit_code == 0
-    verdict = _verdict_line(output)
-    assert "preflight only" in verdict
-    assert "2/2 probes answered" in verdict
+    assert any("PREFLIGHT" in _plain(line) for line in output)
 
 
 def test_an_agent_that_cannot_start_fails_preflight(repo_root: Path) -> None:
@@ -394,9 +379,7 @@ def test_an_empty_answer_fails_preflight(repo_root: Path) -> None:
 
 
 def test_a_falsy_but_present_answer_still_counts(repo_root: Path) -> None:
-    runtime = _runtime(
-        options=VerifyOptions(preflight_only=True), adapter=_FakeAdapter(outputs=[0])
-    )
+    runtime = _runtime(adapter=_FakeAdapter(outputs=[0]), environ={})
 
     exit_code, _ = _run(repo_root, runtime)
 
@@ -415,7 +398,7 @@ def test_uncaptured_model_traffic_fails_preflight(repo_root: Path) -> None:
 def test_substituted_secrets_are_reported(repo_root: Path) -> None:
     resolver = OfflineSecretResolver({})
     resolver.require("SOME_AGENT_SECRET")
-    runtime = _runtime(options=VerifyOptions(preflight_only=True), resolver=resolver)
+    runtime = _runtime(resolver=resolver, environ={})
 
     _, output = _run(repo_root, runtime)
 
@@ -447,16 +430,6 @@ def test_a_partial_run_records_why_it_stopped(repo_root: Path) -> None:
     providers = _json_report(output)["providers"]
     assert providers["state"] == PROVIDERS_UNAVAILABLE
     assert "DEEPSEEK_API_KEY" in providers["reason"]
-
-
-def test_a_preflight_only_run_marks_the_provider_check_skipped(
-    repo_root: Path,
-) -> None:
-    runtime = _runtime(options=VerifyOptions(preflight_only=True))
-
-    _, output = _run(repo_root, runtime, as_json=True)
-
-    assert _json_report(output)["providers"]["state"] == PROVIDERS_SKIPPED
 
 
 # --- benchmark ---------------------------------------------------------------

@@ -27,7 +27,10 @@ from agentbench.cli.verify_runtime import VerifyOptions  # noqa: E402
 
 DEFAULT_AGENT_ID = "langgraph-customer-support-agent"
 PROBE_COUNT = 2
-FORBIDDEN_KEYS = ("DEFUZEX_API_KEY", "OPENROUTER_API_KEY")
+# Stripped so the run stays free and deterministic: without a provider
+# credential it cannot reach the graded benchmark, which is the half this smoke
+# test is not about.
+FORBIDDEN_KEYS = ("DEFUZEX_API_KEY", "OPENROUTER_API_KEY", "DEEPSEEK_API_KEY")
 
 
 def main() -> int:
@@ -41,7 +44,7 @@ def main() -> int:
     # free to change layout without breaking this check.
     exit_code = verify(
         agent_id,
-        options=VerifyOptions(probe_count=PROBE_COUNT, preflight_only=True),
+        options=VerifyOptions(probe_count=PROBE_COUNT),
         output_fn=lines.append,
         as_json=True,
     )
@@ -56,7 +59,10 @@ def main() -> int:
     print(f"captured request/response  : {captured}")
     print(f"substituted secrets        : {report['substituted_secrets'] or 'none'}")
 
-    if exit_code != 0 or report["verdict"] != "pass":
+    # With every credential stripped the run cannot reach the graded benchmark,
+    # so `partial` is the expected verdict — preflight held, the host could not
+    # take it further. Anything else means preflight itself failed.
+    if exit_code != 0 or report["verdict"] != "partial":
         print(f"preflight smoke test FAILED: {report.get('reason')}")
         return 1
     if preflight["probes_answered"] != PROBE_COUNT:

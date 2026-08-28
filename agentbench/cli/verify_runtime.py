@@ -78,7 +78,6 @@ class VerifyOptions:
     # The model that writes the Case and grades the Run, which is a different
     # question from the model the Agent talked to.
     provider_model: str | None = None
-    preflight_only: bool = False
     llm_trace: TraceMode = "off"
     llm_trace_max_bytes: int = DEFAULT_TRACE_MAX_BYTES
 

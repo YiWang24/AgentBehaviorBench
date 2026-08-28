@@ -45,7 +45,6 @@ EXIT_CODES = {PASS: 0, PARTIAL: 0, FAIL: 1, ERROR: 2}
 
 PROVIDERS_READY = "ready"
 PROVIDERS_UNAVAILABLE = "unavailable"
-PROVIDERS_SKIPPED = "skipped"
 
 MARK_OK = "✓"
 MARK_FAIL = "✗"
@@ -84,7 +83,7 @@ class VerifyReport:
     captured_pairs: int = 0
     substituted_secrets: tuple[str, ...] = ()
     # Provider check: could this host grade the Agent at all.
-    providers: str = PROVIDERS_SKIPPED
+    providers: str = PROVIDERS_UNAVAILABLE
     provider_reason: str | None = None
     # The model that wrote the Case and graded the Run, when one did.
     provider_model: str | None = None
@@ -437,12 +436,6 @@ def _verdict_text(report: VerifyReport) -> tuple[str, str]:
             f"{_preflight_text(report)}. Benchmark skipped: "
             f"{report.provider_reason or 'no local Providers available'}",
         )
-    if not report.benchmark_ran:
-        return (
-            f"{ANSI_GREEN}{ANSI_BOLD}PASS{ANSI_RESET}",
-            f"preflight only {SEPARATOR} {_preflight_text(report)}",
-        )
-
     judged = (
         ""
         if report.judge_status is None
@@ -477,7 +470,6 @@ __all__ = [
     "PARTIAL",
     "PASS",
     "PROVIDERS_READY",
-    "PROVIDERS_SKIPPED",
     "PROVIDERS_UNAVAILABLE",
     "Judgment",
     "VerifyReport",
