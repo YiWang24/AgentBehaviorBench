@@ -21,7 +21,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from agentbench.cli.features.verify import verify  # noqa: E402
-from agentbench.cli.verify_runtime import build_verify_runtime  # noqa: E402
+from agentbench.cli.verify_runtime import (  # noqa: E402
+    VerifyOptions,
+    build_verify_runtime,
+)
 
 DEFAULT_AGENT_ID = "langgraph-customer-support-agent"
 PROBE_COUNT = 2

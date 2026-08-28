@@ -9,7 +9,8 @@ shape to keep the Agent running, with no claim to be a real answer.
 from __future__ import annotations
 
 import re
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 # The filler for any string the schema does not otherwise constrain, and the
 # text of a reply that carries no structure at all.

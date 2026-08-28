@@ -473,4 +473,4 @@ def _normalize(text: str) -> str:
     return " ".join(text.split())
 
 
-__all__ = ["LLMActivity", "PREVIEW_CHAR_LIMIT", "event_preview", "latency_text"]
+__all__ = ["PREVIEW_CHAR_LIMIT", "LLMActivity", "event_preview", "latency_text"]

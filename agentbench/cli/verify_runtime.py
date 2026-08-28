@@ -14,13 +14,13 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Literal, get_args
 
+from agentbench.cli.TerminalUI.call_log import CallRecord, CallRecorder
 from agentbench.harness import AgentRunner, BenchmarkRunner, SuiteRunner
 from agentbench.harness.offline import (
     DEFAULT_PROBE_TEXT,
     OfflineSecretResolver,
     OfflineSuiteRunner,
 )
-from agentbench.cli.TerminalUI.call_log import CallRecord, CallRecorder
 from agentbench.runtime import RuntimeFactory
 from agentbench.runtime.docker import DockerRuntime
 from agentbench.runtime.docker.runtime import EgressMode
@@ -371,8 +371,8 @@ class _CompositeTraceSink:
 
 __all__ = [
     "BENCHMARK_MODE",
-    "DEFAULT_DEEPSEEK_MODEL",
     "DEEPSEEK_API_KEY_ENV",
+    "DEFAULT_DEEPSEEK_MODEL",
     "LIVE_SOURCE",
     "MODEL_SOURCES",
     "OFFLINE_SOURCE",

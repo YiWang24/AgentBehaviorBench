@@ -170,8 +170,8 @@ def _decode(content: str) -> dict:
 
 
 __all__ = [
-    "ChatModel",
     "DEFAULT_MAX_TOKENS",
     "DEFAULT_TIMEOUT",
+    "ChatModel",
     "LocalProviderError",
 ]

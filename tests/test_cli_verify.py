@@ -7,10 +7,13 @@ import pytest
 
 from agentbench.cli.features.verify import verify
 from agentbench.cli.main import cli
+from agentbench.cli.presentation import ANSI_PATTERN
+from agentbench.cli.TerminalUI import LLMActivity
+from agentbench.cli.TerminalUI.call_log import CallRecorder
 from agentbench.cli.verify_runtime import (
-    VerifyOptions,
     OFFLINE_TARGET_PLUGIN,
     OFFLINE_UPSTREAM_KEY_ENV,
+    VerifyOptions,
     VerifyRuntime,
     build_verify_runtime,
 )
@@ -25,10 +28,7 @@ from agentbench.harness.offline import (
     StartupCaseProvider,
     StartupJudgeProvider,
 )
-from agentbench.cli.presentation import ANSI_PATTERN
-from agentbench.cli.TerminalUI.call_log import CallRecorder
 from agentbench.harness.runner.benchmark_runner import BenchmarkRunner
-from agentbench.cli.TerminalUI import LLMActivity
 from agentbench.runtime.interception import (
     InterceptionTraceState,
     TerminalTraceSink,

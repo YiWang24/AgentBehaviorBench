@@ -9,10 +9,11 @@ non-streaming ones, so a client reconstructs an identical reply either way.
 from __future__ import annotations
 
 import json
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
-from .offline_schema import OFFLINE_TEXT, arguments_for
 from .offline_prompt import reply_text
+from .offline_schema import OFFLINE_TEXT, arguments_for
 
 _TOOL_CALL_PREFIX = "call_offline_verify"
 

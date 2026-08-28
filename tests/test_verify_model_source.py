@@ -5,9 +5,9 @@ from __future__ import annotations
 import pytest
 
 from agentbench.cli.verify_runtime import (
-    VerifyOptions,
     OFFLINE_TARGET_PLUGIN,
     OFFLINE_UPSTREAM_KEY_ENV,
+    VerifyOptions,
     build_verify_runtime,
 )
 from agentbench.runtime.interception import (

@@ -34,7 +34,6 @@ from agentbench.cli.verify_runtime import (
     OFFLINE_SOURCE,
     STARTUP_MODE,
     VERIFY_MODES,
-    ModelSource,
     VerifyOptions,
     VerifyRuntime,
     build_verify_runtime,
