@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..protocols.providers import CaseGenerationContext, JudgeContext
+from ..submission import COMPLETED, answered, failure_reason
 
 DEFAULT_PROBE_TEXT = "Reply with a short confirmation that you received this message."
 
@@ -27,8 +28,6 @@ INPUT_PREFIX = "input_startup_probe"
 
 STATUS_PASS = "pass"
 STATUS_ISSUE = "issue"
-
-_COMPLETED = "completed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,39 +86,13 @@ class StartupJudgeProvider:
 def _submission_issue(item: Any) -> dict[str, str] | None:
     """Describe why one step failed startup, or None when it succeeded."""
 
-    submission = item.submission
-    input_id = item.test_input.input_id
-    if submission.status != _COMPLETED:
-        return {
-            "code": "input_not_completed",
-            "message": (
-                f"Input {input_id} finished as {submission.status!r}: "
-                f"{submission.error or 'no error reported'}"
-            ),
-        }
-    if _is_blank(submission.output):
-        return {
-            "code": "empty_output",
-            "message": f"Input {input_id} completed but returned no usable output",
-        }
-    return None
-
-
-def _is_blank(output: Any) -> bool:
-    """Treat only genuinely absent output as a failure.
-
-    Agents return strings, mappings, and framework state objects alike; anything
-    that is not empty counts as an answer, because judging shape belongs to a real
-    rubric rather than to a startup check.
-    """
-
-    if output is None:
-        return True
-    if isinstance(output, str):
-        return not output.strip()
-    if isinstance(output, (list, tuple, dict, set)):
-        return len(output) == 0
-    return False
+    if answered(item):
+        return None
+    incomplete = item.submission.status != COMPLETED
+    return {
+        "code": "input_not_completed" if incomplete else "empty_output",
+        "message": f"Input {item.test_input.input_id} {failure_reason(item)}",
+    }
 
 
 __all__ = [
