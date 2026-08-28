@@ -133,19 +133,7 @@ def build_verify_runtime(
     """
 
     options = options or VerifyOptions()
-    if options.llm_trace not in TRACE_MODES:
-        raise ValueError(f"Unsupported LLM trace mode: {options.llm_trace!r}")
-    if options.model_source not in MODEL_SOURCES:
-        raise ValueError(f"Unsupported model source: {options.model_source!r}")
-    if options.mode not in VERIFY_MODES:
-        raise ValueError(f"Unsupported verify mode: {options.mode!r}")
-    if options.mode == BENCHMARK_MODE and options.model_source == OFFLINE_SOURCE:
-        raise ValueError(
-            "Benchmark mode grades what the Agent actually said, and the offline "
-            "source answers every request with the same synthetic text. Pass "
-            f"--model-source {LIVE_SOURCE}, or use --mode {STARTUP_MODE}."
-        )
-
+    _validate(options)
     values = os.environ if environ is None else environ
     provider, egress, overlay, label = _model_plan(
         options.model_source, options.model, values
@@ -156,28 +144,20 @@ def build_verify_runtime(
     trace_state = InterceptionTraceState()
     call_recorder = CallRecorder()
     secret_resolver = OfflineSecretResolver({**values, **overlay})
-    benchmark_runner = BenchmarkRunner(
-        agent_runner=AgentRunner(
-            runtime_factory=RuntimeFactory(
-                docker_builder=_VerifyDockerBuilder(
-                    secret_resolver=secret_resolver,
-                    model_provider=provider,
-                    egress=egress,
-                    trace_sink=_CompositeTraceSink(
-                        _trace_sinks(
-                            trace_state,
-                            call_recorder,
-                            activity_sink=activity_sink,
-                            output_fn=output_fn,
-                            llm_trace=options.llm_trace,
-                        )
-                    ),
-                    trace_max_bytes=options.llm_trace_max_bytes,
-                )
+    benchmark_runner = _benchmark_runner(
+        options,
+        secret_resolver=secret_resolver,
+        model_provider=provider,
+        egress=egress,
+        trace_sink=_CompositeTraceSink(
+            _trace_sinks(
+                trace_state,
+                call_recorder,
+                activity_sink=activity_sink,
+                output_fn=output_fn,
+                llm_trace=options.llm_trace,
             )
         ),
-        # The SDK itself owns the Run: only the Provider pair is local, which is
-        # what keeps the whole path free of DefuzeX credentials and networking.
     )
     runner, provider_label = _suite_runner(
         options.mode,
@@ -196,6 +176,53 @@ def build_verify_runtime(
         model=label,
         mode=options.mode,
         provider_model=provider_label,
+    )
+
+
+def _validate(options: VerifyOptions) -> None:
+    """Reject an unusable combination before anything is built."""
+
+    if options.llm_trace not in TRACE_MODES:
+        raise ValueError(f"Unsupported LLM trace mode: {options.llm_trace!r}")
+    if options.model_source not in MODEL_SOURCES:
+        raise ValueError(f"Unsupported model source: {options.model_source!r}")
+    if options.mode not in VERIFY_MODES:
+        raise ValueError(f"Unsupported verify mode: {options.mode!r}")
+    if options.mode == BENCHMARK_MODE and options.model_source == OFFLINE_SOURCE:
+        raise ValueError(
+            "Benchmark mode grades what the Agent actually said, and the offline "
+            "source answers every request with the same synthetic text. Pass "
+            f"--model-source {LIVE_SOURCE}, or use --mode {STARTUP_MODE}."
+        )
+
+
+def _benchmark_runner(
+    options: VerifyOptions,
+    *,
+    secret_resolver: OfflineSecretResolver,
+    model_provider: ModelTargetProvider,
+    egress: EgressMode,
+    trace_sink: TraceSink,
+) -> BenchmarkRunner:
+    """The Agent-facing half of the stack: one container, one interceptor.
+
+    No Provider arguments are passed here. The SDK itself owns the Run; only the
+    Provider pair is local, which is what keeps the whole path free of DefuzeX
+    credentials and networking.
+    """
+
+    return BenchmarkRunner(
+        agent_runner=AgentRunner(
+            runtime_factory=RuntimeFactory(
+                docker_builder=_VerifyDockerBuilder(
+                    secret_resolver=secret_resolver,
+                    model_provider=model_provider,
+                    egress=egress,
+                    trace_sink=trace_sink,
+                    trace_max_bytes=options.llm_trace_max_bytes,
+                )
+            )
+        )
     )
 
 

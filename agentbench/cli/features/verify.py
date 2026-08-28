@@ -62,6 +62,17 @@ INPUT_FILE_MARKER = "@"
 
 
 def configure_parser(parser: ArgumentParser) -> None:
+    """Declare the flags, grouped the way the help output reads."""
+
+    _add_subject_arguments(parser)
+    _add_model_arguments(parser)
+    _add_report_arguments(parser)
+    _add_trace_arguments(parser)
+
+
+def _add_subject_arguments(parser: ArgumentParser) -> None:
+    """Which Agent to verify, against what, and how many times."""
+
     parser.add_argument("agent_id", help="Registered Agent to verify.")
     parser.add_argument(
         "--env-file",
@@ -97,6 +108,10 @@ def configure_parser(parser: ArgumentParser) -> None:
             f"{DEFAULT_BENCHMARK_INPUT_COUNT} respectively."
         ),
     )
+
+def _add_model_arguments(parser: ArgumentParser) -> None:
+    """Where replies come from, and which model writes the Case and grades it."""
+
     parser.add_argument(
         "--provider-model",
         metavar="MODEL",
@@ -104,26 +119,6 @@ def configure_parser(parser: ArgumentParser) -> None:
             "Model that generates the Case and judges the Run in benchmark mode; "
             "defaults to DEEPSEEK_MODEL. Independent of the model the Agent uses."
         ),
-    )
-    parser.add_argument(
-        "--output",
-        metavar="PATH",
-        help=(
-            "Where to write the benchmark result log. Defaults to "
-            "results/verify-<agent_id>.jsonl; ignored in startup mode, which "
-            "uses a temporary file."
-        ),
-    )
-    parser.add_argument(
-        "--keep-artifacts",
-        action="store_true",
-        help="Keep the temporary result log instead of deleting it on exit.",
-    )
-    parser.add_argument(
-        "--json",
-        dest="as_json",
-        action="store_true",
-        help="Print one JSON summary instead of the human report.",
     )
     parser.add_argument(
         "--model-source",
@@ -144,6 +139,35 @@ def configure_parser(parser: ArgumentParser) -> None:
             "deepseek-chat when --model-source is deepseek."
         ),
     )
+
+
+def _add_report_arguments(parser: ArgumentParser) -> None:
+    """Where the verdict goes and what is kept behind."""
+
+    parser.add_argument(
+        "--output",
+        metavar="PATH",
+        help=(
+            "Where to write the benchmark result log. Defaults to "
+            "results/verify-<agent_id>.jsonl; ignored in startup mode, which "
+            "uses a temporary file."
+        ),
+    )
+    parser.add_argument(
+        "--keep-artifacts",
+        action="store_true",
+        help="Keep the temporary result log instead of deleting it on exit.",
+    )
+    parser.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Print one JSON summary instead of the human report.",
+    )
+
+def _add_trace_arguments(parser: ArgumentParser) -> None:
+    """How much of the captured model traffic to print."""
+
     parser.add_argument(
         "--llm-trace",
         choices=("off", "terminal"),
@@ -362,11 +386,10 @@ def _build_report(
 ) -> VerifyReport:
     """Turn the suite outcome into a startup verdict."""
 
-    result = execution.result
-    item = _agent_item(result, agent_id)
-    # Built once as a passing report and narrowed with `replace` below. A dict of
-    # shared keyword arguments would be untyped at every construction site, which
-    # is exactly where a missing or misspelled field should be caught.
+    item = _agent_item(execution.result, agent_id)
+    # Built once as a passing report and narrowed below. A dict of shared keyword
+    # arguments would be untyped at every construction site, which is exactly
+    # where a missing or misspelled field should be caught.
     report = VerifyReport(
         agent_id=agent_id,
         verdict=PASS,
@@ -392,30 +415,35 @@ def _build_report(
             **_judgment_detail(item),
         )
 
+    reason = _rejection(item, offline)
+    return report if reason is None else replace(report, verdict=FAIL, reason=reason)
+
+
+def _rejection(item: SuiteAgentResult | None, offline: VerifyRuntime) -> str | None:
+    """Why verification failed, or None when every check held.
+
+    Ordered by how early the run could have stopped, so the first thing that
+    went wrong is what gets reported.
+    """
+
     if item is None or not _started(item):
-        reason = "Agent did not complete startup"
         if item is not None and item.error_type is not None:
-            reason = f"{item.error_type}: {item.error_message}"
-        return replace(report, verdict=FAIL, reason=reason)
+            return f"{item.error_type}: {item.error_message}"
+        return "Agent did not complete startup"
 
     # The SDK, not this command, decides whether the Run satisfied its Case. A
     # local Judge still answers only the startup question, but it answers it
     # through the same report contract an official Judge would use.
     judgment = _judge_rejection(item)
     if judgment is not None:
-        return replace(report, verdict=FAIL, reason=judgment)
+        return judgment
 
     if offline.captured_pair_count < 1:
-        return replace(
-            report,
-            verdict=FAIL,
-            reason=(
-                "Agent ran but no model call was captured, so its LLM traffic "
-                "is not observable"
-            ),
+        return (
+            "Agent ran but no model call was captured, so its LLM traffic "
+            "is not observable"
         )
-
-    return report
+    return None
 
 
 def _judgment_detail(item: SuiteAgentResult) -> dict[str, object]:

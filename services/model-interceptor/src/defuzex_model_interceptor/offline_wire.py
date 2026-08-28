@@ -192,6 +192,33 @@ def encode_sse(events: list[tuple[str | None, Any]]) -> bytes:
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
+def _event(name: str, **payload: Any) -> tuple[str, dict[str, Any]]:
+    """One named SSE frame.
+
+    Every frame in these protocols repeats its own event name inside the JSON as
+    ``type``, so naming it once here keeps the two from drifting apart.
+    """
+
+    return name, {"type": name, **payload}
+
+
+def _tool_call_delta(index: int, call: Mapping[str, Any]) -> dict[str, Any]:
+    function = call.get("function", {})
+    return {
+        "tool_calls": [
+            {
+                "index": index,
+                "id": call.get("id"),
+                "type": "function",
+                "function": {
+                    "name": function.get("name"),
+                    "arguments": function.get("arguments", ""),
+                },
+            }
+        ]
+    }
+
+
 def openai_chat_events(body: Mapping[str, Any]) -> list[tuple[str | None, Any]]:
     """Chat-completions SSE frames equivalent to one non-streaming reply."""
 
@@ -204,43 +231,24 @@ def openai_chat_events(body: Mapping[str, Any]) -> list[tuple[str | None, Any]]:
         "model": body.get("model"),
     }
 
-    def chunk(delta: dict[str, Any], finish_reason: str | None) -> dict[str, Any]:
-        return {
+    def chunk(delta: dict[str, Any], finish_reason: str | None = None) -> tuple[None, Any]:
+        return None, {
             **base,
             "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
         }
 
-    events: list[tuple[str | None, Any]] = [(None, chunk({"role": "assistant"}, None))]
+    events: list[tuple[str | None, Any]] = [chunk({"role": "assistant"})]
 
     tool_calls = message.get("tool_calls")
     if tool_calls:
-        for index, call in enumerate(tool_calls):
-            function = call.get("function", {})
-            events.append(
-                (
-                    None,
-                    chunk(
-                        {
-                            "tool_calls": [
-                                {
-                                    "index": index,
-                                    "id": call.get("id"),
-                                    "type": "function",
-                                    "function": {
-                                        "name": function.get("name"),
-                                        "arguments": function.get("arguments", ""),
-                                    },
-                                }
-                            ]
-                        },
-                        None,
-                    ),
-                )
-            )
+        events.extend(
+            chunk(_tool_call_delta(index, call))
+            for index, call in enumerate(tool_calls)
+        )
     elif message.get("content"):
-        events.append((None, chunk({"content": message["content"]}, None)))
+        events.append(chunk({"content": message["content"]}))
 
-    events.append((None, chunk({}, choice.get("finish_reason", "stop"))))
+    events.append(chunk({}, choice.get("finish_reason", "stop")))
     events.append((None, "[DONE]"))
     return events
 
@@ -250,82 +258,46 @@ def anthropic_events(body: Mapping[str, Any]) -> list[tuple[str | None, Any]]:
 
     opening = {key: value for key, value in body.items() if key != "content"}
     opening["content"] = []
-    events: list[tuple[str | None, Any]] = [
-        ("message_start", {"type": "message_start", "message": opening})
-    ]
 
+    events: list[tuple[str | None, Any]] = [_event("message_start", message=opening)]
     for index, block in enumerate(body.get("content", [])):
-        if block.get("type") == "tool_use":
-            events.append(
-                (
-                    "content_block_start",
-                    {
-                        "type": "content_block_start",
-                        "index": index,
-                        "content_block": {
-                            "type": "tool_use",
-                            "id": block.get("id"),
-                            "name": block.get("name"),
-                            "input": {},
-                        },
-                    },
-                )
-            )
-            events.append(
-                (
-                    "content_block_delta",
-                    {
-                        "type": "content_block_delta",
-                        "index": index,
-                        "delta": {
-                            "type": "input_json_delta",
-                            "partial_json": json.dumps(
-                                block.get("input", {}), ensure_ascii=False
-                            ),
-                        },
-                    },
-                )
-            )
-        else:
-            events.append(
-                (
-                    "content_block_start",
-                    {
-                        "type": "content_block_start",
-                        "index": index,
-                        "content_block": {"type": "text", "text": ""},
-                    },
-                )
-            )
-            events.append(
-                (
-                    "content_block_delta",
-                    {
-                        "type": "content_block_delta",
-                        "index": index,
-                        "delta": {"type": "text_delta", "text": block.get("text", "")},
-                    },
-                )
-            )
-        events.append(
-            ("content_block_stop", {"type": "content_block_stop", "index": index})
-        )
-
+        events.extend(_anthropic_block_events(index, block))
     events.append(
-        (
+        _event(
             "message_delta",
-            {
-                "type": "message_delta",
-                "delta": {
-                    "stop_reason": body.get("stop_reason"),
-                    "stop_sequence": None,
-                },
-                "usage": body.get("usage", {}),
-            },
+            delta={"stop_reason": body.get("stop_reason"), "stop_sequence": None},
+            usage=body.get("usage", {}),
         )
     )
-    events.append(("message_stop", {"type": "message_stop"}))
+    events.append(_event("message_stop"))
     return events
+
+
+def _anthropic_block_events(
+    index: int, block: Mapping[str, Any]
+) -> list[tuple[str, dict[str, Any]]]:
+    """The start/delta/stop trio one content block streams as."""
+
+    if block.get("type") == "tool_use":
+        content_block = {
+            "type": "tool_use",
+            "id": block.get("id"),
+            "name": block.get("name"),
+            "input": {},
+        }
+        delta = {
+            "type": "input_json_delta",
+            "partial_json": json.dumps(block.get("input", {}), ensure_ascii=False),
+        }
+    else:
+        content_block = {"type": "text", "text": ""}
+        delta = {"type": "text_delta", "text": block.get("text", "")}
+
+    return [
+        _event("content_block_start", index=index, content_block=content_block),
+        _event("content_block_delta", index=index, delta=delta),
+        _event("content_block_stop", index=index),
+    ]
 
 
 def openai_responses_events(body: Mapping[str, Any]) -> list[tuple[str | None, Any]]:
@@ -341,34 +313,16 @@ def openai_responses_events(body: Mapping[str, Any]) -> list[tuple[str | None, A
     creating["status"] = "in_progress"
 
     events: list[tuple[str | None, Any]] = [
-        ("response.created", {"type": "response.created", "response": creating})
+        _event("response.created", response=creating)
     ]
-
     for index, item in enumerate(body.get("output", [])):
         events.append(
-            (
-                "response.output_item.added",
-                {
-                    "type": "response.output_item.added",
-                    "output_index": index,
-                    "item": item,
-                },
-            )
+            _event("response.output_item.added", output_index=index, item=item)
         )
         events.append(
-            (
-                "response.output_item.done",
-                {
-                    "type": "response.output_item.done",
-                    "output_index": index,
-                    "item": item,
-                },
-            )
+            _event("response.output_item.done", output_index=index, item=item)
         )
-
-    events.append(
-        ("response.completed", {"type": "response.completed", "response": dict(body)})
-    )
+    events.append(_event("response.completed", response=dict(body)))
     return events
 
 
