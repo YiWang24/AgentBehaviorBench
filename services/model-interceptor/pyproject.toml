@@ -24,6 +24,7 @@ anthropic-api-key = "defuzex_model_interceptor.auth:ANTHROPIC_API_KEY_AUTH"
 
 [project.entry-points."defuzex.model_interceptor.targets"]
 openrouter = "defuzex_model_interceptor.targets:OPENROUTER_TARGET"
+offline-mock = "defuzex_model_interceptor.offline:OFFLINE_MOCK_TARGET"
 
 [tool.setuptools.packages.find]
 where = ["src"]
