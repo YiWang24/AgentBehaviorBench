@@ -12,7 +12,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 from uuid import uuid4
 
 from agentbench.credential_shape import shaped
@@ -49,6 +49,7 @@ CA_EXPORT_DIR_MODE = 0o777
 LOOPBACK_ADDRESS = "127.0.0.1"
 
 EgressMode = Literal["open", "blocked"]
+EGRESS_MODES: tuple[EgressMode, ...] = get_args(EgressMode)
 
 
 class DockerRuntimeError(RuntimeError):
@@ -72,7 +73,7 @@ class DockerRuntime:
     ) -> None:
         if trace_max_bytes < 1024:
             raise ValueError("trace_max_bytes must be at least 1024")
-        if egress not in ("open", "blocked"):
+        if egress not in EGRESS_MODES:
             raise ValueError(f"Unsupported egress mode: {egress!r}")
         self._egress = egress
         self._executable = executable
