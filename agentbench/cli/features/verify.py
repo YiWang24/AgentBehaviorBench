@@ -34,8 +34,7 @@ from agentbench.cli.verify_runtime import (
     OFFLINE_SOURCE,
     STARTUP_MODE,
     VERIFY_MODES,
-    ModelSource,
-    VerifyMode,
+    VerifyOptions,
     VerifyRuntime,
     build_verify_runtime,
 )
@@ -62,6 +61,17 @@ INPUT_FILE_MARKER = "@"
 
 
 def configure_parser(parser: ArgumentParser) -> None:
+    """Declare the flags, grouped the way the help output reads."""
+
+    _add_subject_arguments(parser)
+    _add_model_arguments(parser)
+    _add_report_arguments(parser)
+    _add_trace_arguments(parser)
+
+
+def _add_subject_arguments(parser: ArgumentParser) -> None:
+    """Which Agent to verify, against what, and how many times."""
+
     parser.add_argument("agent_id", help="Registered Agent to verify.")
     parser.add_argument(
         "--env-file",
@@ -97,6 +107,10 @@ def configure_parser(parser: ArgumentParser) -> None:
             f"{DEFAULT_BENCHMARK_INPUT_COUNT} respectively."
         ),
     )
+
+def _add_model_arguments(parser: ArgumentParser) -> None:
+    """Where replies come from, and which model writes the Case and grades it."""
+
     parser.add_argument(
         "--provider-model",
         metavar="MODEL",
@@ -104,26 +118,6 @@ def configure_parser(parser: ArgumentParser) -> None:
             "Model that generates the Case and judges the Run in benchmark mode; "
             "defaults to DEEPSEEK_MODEL. Independent of the model the Agent uses."
         ),
-    )
-    parser.add_argument(
-        "--output",
-        metavar="PATH",
-        help=(
-            "Where to write the benchmark result log. Defaults to "
-            "results/verify-<agent_id>.jsonl; ignored in startup mode, which "
-            "uses a temporary file."
-        ),
-    )
-    parser.add_argument(
-        "--keep-artifacts",
-        action="store_true",
-        help="Keep the temporary result log instead of deleting it on exit.",
-    )
-    parser.add_argument(
-        "--json",
-        dest="as_json",
-        action="store_true",
-        help="Print one JSON summary instead of the human report.",
     )
     parser.add_argument(
         "--model-source",
@@ -144,6 +138,35 @@ def configure_parser(parser: ArgumentParser) -> None:
             "deepseek-chat when --model-source is deepseek."
         ),
     )
+
+
+def _add_report_arguments(parser: ArgumentParser) -> None:
+    """Where the verdict goes and what is kept behind."""
+
+    parser.add_argument(
+        "--output",
+        metavar="PATH",
+        help=(
+            "Where to write the benchmark result log. Defaults to "
+            "results/verify-<agent_id>.jsonl; ignored in startup mode, which "
+            "uses a temporary file."
+        ),
+    )
+    parser.add_argument(
+        "--keep-artifacts",
+        action="store_true",
+        help="Keep the temporary result log instead of deleting it on exit.",
+    )
+    parser.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Print one JSON summary instead of the human report.",
+    )
+
+def _add_trace_arguments(parser: ArgumentParser) -> None:
+    """How much of the captured model traffic to print."""
+
     parser.add_argument(
         "--llm-trace",
         choices=("off", "terminal"),
@@ -162,54 +185,49 @@ def configure_parser(parser: ArgumentParser) -> None:
 def execute(args: Namespace) -> int:
     load_project_environment(args.env_file)
     benchmark = args.mode == BENCHMARK_MODE
-    kwargs: dict[str, object] = {
-        "input_count": args.inputs
-        if args.inputs is not None
-        else (DEFAULT_BENCHMARK_INPUT_COUNT if benchmark else DEFAULT_INPUT_COUNT),
-        "keep_artifacts": args.keep_artifacts,
-    }
-    if benchmark:
-        kwargs["mode"] = args.mode
-        # Grading synthetic replies is meaningless, so benchmark mode implies a
-        # live model unless the caller named a different one.
-        kwargs["model_source"] = (
-            LIVE_SOURCE if args.model_source == OFFLINE_SOURCE else args.model_source
-        )
-    elif args.model_source != OFFLINE_SOURCE:
-        kwargs["model_source"] = args.model_source
-    if args.provider_model is not None:
-        kwargs["provider_model"] = args.provider_model
-    if args.output is not None:
-        kwargs["output_path"] = args.output
-    if args.as_json:
-        kwargs["as_json"] = True
-    if args.input is not None:
-        kwargs["probe_text"] = _probe_text(args.input)
-    if args.model is not None:
-        kwargs["model"] = args.model
-    if args.llm_trace != "off":
-        kwargs["llm_trace"] = args.llm_trace
-    if args.llm_trace_max_bytes != DEFAULT_TRACE_MAX_BYTES:
-        kwargs["llm_trace_max_bytes"] = args.llm_trace_max_bytes
-    return verify(args.agent_id, **kwargs)
+    return verify(
+        args.agent_id,
+        options=VerifyOptions(
+            input_count=(
+                args.inputs
+                if args.inputs is not None
+                else (
+                    DEFAULT_BENCHMARK_INPUT_COUNT if benchmark else DEFAULT_INPUT_COUNT
+                )
+            ),
+            probe_text=(
+                _probe_text(args.input)
+                if args.input is not None
+                else DEFAULT_PROBE_TEXT
+            ),
+            mode=args.mode,
+            # Grading synthetic replies is meaningless, so benchmark mode implies
+            # a live model unless the caller named a different one.
+            model_source=(
+                LIVE_SOURCE
+                if benchmark and args.model_source == OFFLINE_SOURCE
+                else args.model_source
+            ),
+            model=args.model,
+            provider_model=args.provider_model,
+            llm_trace=args.llm_trace,
+            llm_trace_max_bytes=args.llm_trace_max_bytes,
+        ),
+        keep_artifacts=args.keep_artifacts,
+        output_path=args.output,
+        as_json=args.as_json,
+    )
 
 
 def verify(
     agent_id: str,
     *,
+    options: VerifyOptions | None = None,
     registry_path: str | Path = DEFAULT_REGISTRY_PATH,
-    probe_text: str = DEFAULT_PROBE_TEXT,
-    input_count: int = DEFAULT_INPUT_COUNT,
     keep_artifacts: bool = False,
     output_fn: Callable[[str], None] = print,
     offline: VerifyRuntime | None = None,
-    mode: VerifyMode = STARTUP_MODE,
-    model_source: ModelSource = OFFLINE_SOURCE,
-    model: str | None = None,
-    provider_model: str | None = None,
     output_path: str | Path | None = None,
-    llm_trace: str = "off",
-    llm_trace_max_bytes: int = DEFAULT_TRACE_MAX_BYTES,
     as_json: bool = False,
 ) -> int:
     """Run one Agent through a real SDK Run without any DefuzeX credentials.
@@ -229,10 +247,11 @@ def verify(
     ``certify`` is only who writes the Case and who grades it.
     """
 
+    options = options or VerifyOptions()
     # In JSON mode nothing may reach stdout before the document itself.
     stage_output = _discard if as_json else output_fn
 
-    agent, rejection = _select_agent(agent_id, registry_path, input_count)
+    agent, rejection = _select_agent(agent_id, registry_path, options.input_count)
     if agent is None:
         return _fail_early(agent_id, rejection, output_fn, as_json=as_json)
 
@@ -245,15 +264,8 @@ def verify(
     if offline is None:
         try:
             offline = build_verify_runtime(
-                max_inputs=input_count,
-                probe_text=probe_text,
+                options,
                 output_fn=stage_output,
-                mode=mode,
-                model_source=model_source,
-                model=model,
-                provider_model=provider_model,
-                llm_trace=llm_trace,
-                llm_trace_max_bytes=llm_trace_max_bytes,
                 activity_sink=llm_activity,
             )
         except Exception as exc:
@@ -373,61 +385,64 @@ def _build_report(
 ) -> VerifyReport:
     """Turn the suite outcome into a startup verdict."""
 
-    result = execution.result
-    log_path = (
-        execution.result_log.path
-        if keep_artifacts and execution.result_log is not None
-        else None
+    item = _agent_item(execution.result, agent_id)
+    # Built once as a passing report and narrowed below. A dict of shared keyword
+    # arguments would be untyped at every construction site, which is exactly
+    # where a missing or misspelled field should be caught.
+    report = VerifyReport(
+        agent_id=agent_id,
+        verdict=PASS,
+        captured_pairs=offline.captured_pair_count,
+        substituted_secrets=offline.substituted_secrets,
+        result_log=(
+            execution.result_log.path
+            if keep_artifacts and execution.result_log is not None
+            else None
+        ),
+        calls=offline.calls,
+        model_source=offline.model_source,
+        model=offline.model,
+        mode=offline.mode,
+        provider_model=offline.provider_model,
     )
-    common: dict[str, object] = {
-        "agent_id": agent_id,
-        "captured_pairs": offline.captured_pair_count,
-        "substituted_secrets": offline.substituted_secrets,
-        "result_log": log_path,
-        "calls": offline.calls,
-        "model_source": offline.model_source,
-        "model": offline.model,
-        "mode": offline.mode,
-        "provider_model": offline.provider_model,
-    }
-    item = _agent_item(result, agent_id)
     if item is not None:
-        common.update(
+        report = replace(
+            report,
             completed_cases=item.completed_case_count,
             requested_cases=item.requested_case_count,
             judge_status=_judge_status(item),
             **_judgment_detail(item),
         )
 
+    reason = _rejection(item, offline)
+    return report if reason is None else replace(report, verdict=FAIL, reason=reason)
+
+
+def _rejection(item: SuiteAgentResult | None, offline: VerifyRuntime) -> str | None:
+    """Why verification failed, or None when every check held.
+
+    Ordered by how early the run could have stopped, so the first thing that
+    went wrong is what gets reported.
+    """
+
     if item is None or not _started(item):
-        reason = "Agent did not complete startup"
         if item is not None and item.error_type is not None:
-            reason = f"{item.error_type}: {item.error_message}"
-        return VerifyReport(
-            verdict=FAIL,
-            reason=reason,
-            **common,  # type: ignore[arg-type]
-        )
+            return f"{item.error_type}: {item.error_message}"
+        return "Agent did not complete startup"
 
     # The SDK, not this command, decides whether the Run satisfied its Case. A
     # local Judge still answers only the startup question, but it answers it
     # through the same report contract an official Judge would use.
     judgment = _judge_rejection(item)
     if judgment is not None:
-        return VerifyReport(
-            verdict=FAIL,
-            reason=judgment,
-            **common,  # type: ignore[arg-type]
-        )
+        return judgment
 
     if offline.captured_pair_count < 1:
-        return VerifyReport(
-            verdict=FAIL,
-            reason="Agent ran but no model call was captured, so its LLM traffic is not observable",
-            **common,  # type: ignore[arg-type]
+        return (
+            "Agent ran but no model call was captured, so its LLM traffic "
+            "is not observable"
         )
-
-    return VerifyReport(verdict=PASS, **common)  # type: ignore[arg-type]
+    return None
 
 
 def _judgment_detail(item: SuiteAgentResult) -> dict[str, object]:
@@ -485,10 +500,9 @@ def _judge_status(item: SuiteAgentResult) -> str | None:
     ]
     if not statuses:
         return None
-    for status in statuses:
-        if status != STATUS_PASS:
-            return status
-    return STATUS_PASS
+    return next(
+        (status for status in statuses if status != STATUS_PASS), STATUS_PASS
+    )
 
 
 def _judge_rejection(item: SuiteAgentResult) -> str | None:
