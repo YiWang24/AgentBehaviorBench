@@ -58,6 +58,30 @@ def test_interceptor_has_an_independent_mitmproxy_service() -> None:
     assert "defuzex.model_interceptor.targets" in metadata["project"]["entry-points"]
 
 
+def test_offline_target_is_declared_as_an_installable_entry_point() -> None:
+    metadata = tomllib.loads(
+        INTERCEPTOR_CONTEXT.joinpath("pyproject.toml").read_text(encoding="utf-8")
+    )
+    targets = metadata["project"]["entry-points"]["defuzex.model_interceptor.targets"]
+
+    assert targets["offline-mock"] == (
+        "defuzex_model_interceptor.offline:OFFLINE_MOCK_TARGET"
+    )
+
+
+def test_offline_responder_runs_after_the_main_addon() -> None:
+    """Ordering is load-bearing: the main addon must open the trace pair and
+    authorize the call before the responder short-circuits the flow."""
+
+    source = INTERCEPTOR_SRC.joinpath(
+        "defuzex_model_interceptor", "loader.py"
+    ).read_text(encoding="utf-8")
+
+    assert source.index("ModelInterceptorAddon(_config)") < source.index(
+        "OfflineResponderAddon("
+    )
+
+
 def test_interceptor_image_build_is_scoped_to_service_context() -> None:
     builder = RecordingImageBuilder()
     provider = LocalInterceptorImageProvider(builder, INTERCEPTOR_CONTEXT)  # type: ignore[arg-type]
@@ -195,6 +219,85 @@ def test_openrouter_target_rewrites_endpoint_model_and_optional_headers(
     assert prepared.source_model == "gpt-source"
     assert prepared.target_model == "openai/gpt-4.1-mini"
     assert b'"model":"openai/gpt-4.1-mini"' in request.content
+
+
+def test_deepseek_is_registered_and_shares_the_openai_compatible_adapter() -> None:
+    """DeepSeek speaks the OpenAI chat format, so it needs no bespoke plugin."""
+
+    from defuzex_model_interceptor.registry import load_targets
+    from defuzex_model_interceptor.targets import DEEPSEEK_TARGET
+
+    assert load_targets()["deepseek"] is DEEPSEEK_TARGET
+
+    request = type(
+        "Request",
+        (),
+        {
+            "scheme": "https",
+            "host": "api.openai.com",
+            "port": 443,
+            "path": "/v1/chat/completions",
+            "content": b'{"model":"gpt-source","messages":[]}',
+            "headers": {"authorization": "Bearer upstream"},
+        },
+    )()
+    route = Route(
+        route_id="chat",
+        host_patterns=("api.openai.com",),
+        ports=(443,),
+        methods=("POST",),
+        path_patterns=("/v1/chat/completions",),
+        protocol_plugin="openai-chat",
+        credential_id="primary",
+    )
+    target = Target(
+        provider_id="deepseek",
+        target_plugin="deepseek",
+        base_url="https://api.deepseek.com/v1",
+        model="deepseek-chat",
+        headers={},
+    )
+
+    prepared = DEEPSEEK_TARGET.prepare_request(request, route=route, target=target)
+
+    assert request.host == "api.deepseek.com"
+    assert request.path == "/v1/chat/completions"
+    assert prepared.target_model == "deepseek-chat"
+    assert b'"model":"deepseek-chat"' in request.content
+
+
+@pytest.mark.parametrize(
+    "protocol", ["openai-responses", "anthropic-messages", "json-http"]
+)
+def test_deepseek_refuses_protocols_it_does_not_publish(protocol: str) -> None:
+    """Rewriting these onto DeepSeek produced a bare upstream 404 instead.
+
+    The provider serves only /chat/completions, so routing must fail here with a
+    reason rather than at an endpoint that was never published.
+    """
+
+    from defuzex_model_interceptor.targets import DEEPSEEK_TARGET, TargetRoutingError
+
+    route = Route(
+        route_id="odd",
+        host_patterns=("api.openai.com",),
+        ports=(443,),
+        methods=("POST",),
+        path_patterns=("/v1/anything",),
+        protocol_plugin=protocol,
+        credential_id="primary",
+    )
+
+    with pytest.raises(TargetRoutingError, match=f"deepseek.*{protocol}"):
+        DEEPSEEK_TARGET.prepare_request(object(), route=route, target=object())
+
+
+def test_openrouter_still_accepts_every_endpoint_it_publishes() -> None:
+    """Declaring DeepSeek's subset must not narrow the shared adapter."""
+
+    from defuzex_model_interceptor.targets import OPENROUTER_TARGET
+
+    assert OPENROUTER_TARGET.protocols is None
 
 
 def test_trace_redaction_covers_headers_fields_and_literal_secrets() -> None:
