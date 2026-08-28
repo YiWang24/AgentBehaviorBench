@@ -9,10 +9,16 @@ from .config import (
 from .image import InterceptorImageProvider, StaticInterceptorImageProvider
 from .plugins import TrustPlugin, get_trust_plugin
 from .providers import (
+    DEEPSEEK_API_KEY_ENV,
+    DEEPSEEK_BASE_URL_ENV,
+    DEEPSEEK_MODEL_ENV,
+    DEFAULT_DEEPSEEK_BASE_URL,
+    DEFAULT_DEEPSEEK_MODEL,
     DEFAULT_OPENROUTER_BASE_URL,
     OPENROUTER_API_KEY_ENV,
     OPENROUTER_BASE_URL_ENV,
     OPENROUTER_MODEL_ENV,
+    DeepSeekProvider,
     ModelTargetConfig,
     ModelTargetProvider,
     OpenRouterProvider,
@@ -21,6 +27,7 @@ from .providers import (
 from .session import RunningModelInterceptor
 from .trace import (
     DEFAULT_TRACE_MAX_BYTES,
+    CompositeTraceSink,
     InterceptionTraceState,
     NullTraceSink,
     TerminalTraceSink,
@@ -29,8 +36,15 @@ from .trace import (
 )
 
 __all__ = [
+    "CompositeTraceSink",
     "CredentialConfig",
+    "DEEPSEEK_API_KEY_ENV",
+    "DEEPSEEK_BASE_URL_ENV",
+    "DEEPSEEK_MODEL_ENV",
+    "DEFAULT_DEEPSEEK_BASE_URL",
+    "DEFAULT_DEEPSEEK_MODEL",
     "DEFAULT_TRACE_MAX_BYTES",
+    "DeepSeekProvider",
     "InterceptionConfig",
     "InterceptionConfigurationError",
     "InterceptionTraceState",
