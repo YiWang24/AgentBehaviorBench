@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 
 from agentbench.runtime.interception import TraceEvent
 
-from .LLMactivity import PREVIEW_CHAR_LIMIT, event_preview
+from .LLMactivity import PREVIEW_CHAR_LIMIT, event_preview, latency_text
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,9 +27,7 @@ class CallRecord:
 
     @property
     def latency_text(self) -> str:
-        if isinstance(self.latency_ms, (int, float)):
-            return f"{float(self.latency_ms):.1f}ms"
-        return "-"
+        return latency_text(self.latency_ms)
 
     @property
     def status_text(self) -> str:
