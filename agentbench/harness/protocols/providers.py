@@ -41,15 +41,23 @@ class HistoryItemLike(Protocol):
     submission: SubmissionLike
 
 
+class CaseLike(Protocol):
+    """The Case a Run was executed against."""
+
+    rubric: Mapping[str, Any]
+
+
 class JudgeContext(Protocol):
     """Immutable completed Run history handed to a Judge Provider."""
 
+    case: CaseLike
     history: Sequence[HistoryItemLike]
     run_status: str
 
 
 __all__ = [
     "CaseGenerationContext",
+    "CaseLike",
     "HistoryItemLike",
     "JudgeContext",
     "SubmissionLike",
