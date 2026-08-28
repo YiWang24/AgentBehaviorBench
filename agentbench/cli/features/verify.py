@@ -53,6 +53,7 @@ from agentbench.cli.verify_runtime import (
     DEFAULT_INPUT_COUNT,
     DEFAULT_PROBE_COUNT,
     DEFAULT_PROBE_TEXT,
+    PROVIDER_NAMES,
     VerifyOptions,
     VerifyRuntime,
     build_verify_runtime,
@@ -105,11 +106,22 @@ def configure_parser(parser: ArgumentParser) -> None:
 
     # Which model the Agent answers with, and which one grades it.
     parser.add_argument(
+        "--provider",
+        choices=PROVIDER_NAMES,
+        default="deepseek",
+        help=(
+            "Upstream the Agent's own traffic is routed to. DeepSeek serves "
+            "only /chat/completions; an Agent whose manifest declares "
+            "openai-responses or anthropic-messages needs openrouter."
+        ),
+    )
+    parser.add_argument(
         "--model",
         metavar="MODEL",
         help=(
             "Model the Agent talks to during the graded benchmark; defaults to "
-            "DEEPSEEK_MODEL. Preflight always answers from the interceptor."
+            "the chosen provider's own MODEL variable. Preflight always answers "
+            "from the interceptor."
         ),
     )
     parser.add_argument(
@@ -165,6 +177,7 @@ def execute(args: Namespace) -> int:
                 if args.input is not None
                 else DEFAULT_PROBE_TEXT
             ),
+            provider=args.provider,
             model=args.model,
             provider_model=args.provider_model,
             llm_trace=args.llm_trace,

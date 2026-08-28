@@ -17,7 +17,6 @@ from dataclasses import dataclass
 
 from agentbench.harness.errors import error_detail
 from agentbench.harness.local import ChatModel
-from agentbench.runtime.interception import DeepSeekProvider
 
 from .progress import StageReporter
 from .verify_runtime import VerifyOptions
@@ -78,7 +77,7 @@ def _stopped(stages: StageReporter, exc: Exception) -> str:
 def _agent_model(options: VerifyOptions, environ: Mapping[str, str]) -> str:
     """Resolve the live target now, so a bad slug is not a 401 minutes later."""
 
-    target = DeepSeekProvider(options.model).resolve(environ)
+    target = options.model_provider().resolve(environ)
     if not environ.get(target.credential_env, "").strip():
         raise RuntimeError(
             f"A graded benchmark needs {target.credential_env}. Set it in the "

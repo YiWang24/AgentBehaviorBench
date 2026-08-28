@@ -15,12 +15,18 @@ from agentbench.runtime.interception import (
     DEEPSEEK_API_KEY_ENV,
     DEFAULT_DEEPSEEK_BASE_URL,
     DEFAULT_DEEPSEEK_MODEL,
+    OPENROUTER_API_KEY_ENV,
+    OPENROUTER_MODEL_ENV,
     DeepSeekProvider,
     InterceptionConfigurationError,
     TraceEvent,
 )
 
 LIVE_ENV = {DEEPSEEK_API_KEY_ENV: "sk-not-a-real-key"}
+OPENROUTER_ENV = {
+    OPENROUTER_API_KEY_ENV: "sk-or-not-a-real-key",
+    OPENROUTER_MODEL_ENV: "vendor/some-model",
+}
 
 
 def _runtime(options: VerifyOptions | None = None, environ: dict | None = None):
@@ -120,6 +126,26 @@ class TestBenchmarkStack:
         )
 
         assert docker._model_provider.resolve(LIVE_ENV).model == "deepseek-reasoner"
+
+    def test_the_provider_flag_selects_the_upstream(self) -> None:
+        """DeepSeek serves no /responses or /messages, so some Agents need the other."""
+
+        docker = _benchmark_docker(
+            _runtime(VerifyOptions(provider="openrouter"), environ=OPENROUTER_ENV)
+        )
+
+        assert docker._model_provider.resolve(OPENROUTER_ENV).provider_id == (
+            "openrouter"
+        )
+
+    def test_the_provider_check_resolves_the_same_upstream_as_the_run(self) -> None:
+        """Otherwise the check clears a credential the run never uses."""
+
+        options = VerifyOptions(provider="openrouter")
+
+        assert options.model_provider().resolve(OPENROUTER_ENV).credential_env == (
+            OPENROUTER_API_KEY_ENV
+        )
 
     def test_it_carries_the_requested_input_count(self) -> None:
         runtime = _runtime(VerifyOptions(input_count=5), environ=LIVE_ENV)

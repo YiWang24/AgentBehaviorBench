@@ -30,6 +30,7 @@ from agentbench.runtime.interception import (
     DEFAULT_TRACE_MAX_BYTES,
     CompositeTraceSink,
     DeepSeekProvider,
+    OpenRouterProvider,
     InterceptionTraceState,
     ModelTargetConfig,
     ModelTargetProvider,
@@ -46,7 +47,10 @@ OFFLINE_UPSTREAM_KEY_ENV = "DEFUZEX_OFFLINE_UPSTREAM_KEY"
 OFFLINE_UPSTREAM_KEY_VALUE = "offline-verify-no-upstream"
 
 TraceMode = Literal["off", "terminal"]
+# The upstreams an Agent's traffic can be routed to during a graded benchmark.
+ProviderName = Literal["deepseek", "openrouter"]
 TRACE_MODES: tuple[TraceMode, ...] = get_args(TraceMode)
+PROVIDER_NAMES: tuple[ProviderName, ...] = get_args(ProviderName)
 
 # One probe answers the preflight question. One generated Case does not answer
 # the behavior question, because a single Input cannot cover a requirement.
@@ -78,8 +82,27 @@ class VerifyOptions:
     # The model that writes the Case and grades the Run, which is a different
     # question from the model the Agent talked to.
     provider_model: str | None = None
+    # Which upstream the Agent's own traffic is rewritten onto. DeepSeek
+    # publishes only /chat/completions and rejects several response_format
+    # types, so an Agent whose manifest declares openai-responses or
+    # anthropic-messages cannot be routed there at all; OpenRouter serves all
+    # three. The default stays on DeepSeek because it is the cheaper of the two
+    # and serves the majority of the registry.
+    provider: ProviderName = "deepseek"
     llm_trace: TraceMode = "off"
     llm_trace_max_bytes: int = DEFAULT_TRACE_MAX_BYTES
+
+    def model_provider(self) -> ModelTargetProvider:
+        """The upstream that answers the Agent during the graded benchmark.
+
+        Resolved from the option in one place because the runtime and the
+        provider check must agree: a check against DeepSeek would clear a run
+        that then routes to OpenRouter, and report the wrong missing credential.
+        """
+
+        if self.provider == "openrouter":
+            return OpenRouterProvider(self.model)
+        return DeepSeekProvider(self.model)
 
 
 @dataclass(frozen=True)
@@ -139,7 +162,7 @@ class VerifyRuntime:
             benchmark_runner=BenchmarkRunner(
                 agent_runner=AgentRunner(
                     runtime_factory=self._runtime_factory(
-                        DeepSeekProvider(self.options.model), "open"
+                        self.options.model_provider(), "open"
                     )
                 )
             ),
@@ -278,6 +301,7 @@ __all__ = [
     "OFFLINE_MODEL",
     "OFFLINE_TARGET_PLUGIN",
     "OFFLINE_UPSTREAM_KEY_ENV",
+    "PROVIDER_NAMES",
     "TRACE_MODES",
     "VerifyOptions",
     "VerifyRuntime",
