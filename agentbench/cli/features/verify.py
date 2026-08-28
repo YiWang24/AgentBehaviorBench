@@ -1,4 +1,10 @@
-"""Verify one Agent starts and is observable, without any DefuzeX credentials."""
+"""Verify one Agent through the DefuzeX SDK, without any DefuzeX credentials.
+
+Two questions can be asked, and they need different machinery. ``startup`` asks
+whether the Agent runs at all and is cheap enough to repeat while adapting one.
+``benchmark`` asks whether it behaves, by running the same flow ``certify`` runs
+with locally generated Cases and local judging in place of the official services.
+"""
 
 from __future__ import annotations
 
@@ -17,15 +23,19 @@ from agentbench.runtime.agentcontainer import runtime_type
 from agentbench.runtime.interception import (
     DEFAULT_TRACE_MAX_BYTES,
     InterceptionConfig,
-    InterceptionConfigurationError,
 )
 
 from agentbench.cli.environment import load_project_environment
 from agentbench.cli.execution import BenchmarkExecution, run_benchmark_once
 from agentbench.cli.verify_runtime import (
+    BENCHMARK_MODE,
+    LIVE_SOURCE,
     MODEL_SOURCES,
     OFFLINE_SOURCE,
+    STARTUP_MODE,
+    VERIFY_MODES,
     ModelSource,
+    VerifyMode,
     VerifyRuntime,
     build_verify_runtime,
 )
@@ -44,6 +54,9 @@ from .base import CommandFeature
 from .run import DEFAULT_REGISTRY_PATH
 
 DEFAULT_INPUT_COUNT = 1
+# One probe answers the startup question; one generated Case does not answer the
+# behavior question, because a single Input cannot cover a requirement.
+DEFAULT_BENCHMARK_INPUT_COUNT = 3
 ARTIFACT_PREFIX = "agentbench-verify-"
 INPUT_FILE_MARKER = "@"
 
@@ -64,11 +77,42 @@ def configure_parser(parser: ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--mode",
+        choices=VERIFY_MODES,
+        default=STARTUP_MODE,
+        help=(
+            "'startup' (default) checks that the Agent runs and its model traffic "
+            "is observable, using no credentials. 'benchmark' runs the same flow "
+            "as certify with locally generated Cases and local judging, which "
+            "needs DEEPSEEK_API_KEY and a live model source."
+        ),
+    )
+    parser.add_argument(
         "--inputs",
         type=int,
-        default=DEFAULT_INPUT_COUNT,
         metavar="N",
-        help="Number of probe inputs to send. Defaults to 1.",
+        help=(
+            "Startup probes to send, or Inputs to generate in benchmark mode. "
+            f"Defaults to {DEFAULT_INPUT_COUNT} and "
+            f"{DEFAULT_BENCHMARK_INPUT_COUNT} respectively."
+        ),
+    )
+    parser.add_argument(
+        "--provider-model",
+        metavar="MODEL",
+        help=(
+            "Model that generates the Case and judges the Run in benchmark mode; "
+            "defaults to DEEPSEEK_MODEL. Independent of the model the Agent uses."
+        ),
+    )
+    parser.add_argument(
+        "--output",
+        metavar="PATH",
+        help=(
+            "Where to write the benchmark result log. Defaults to "
+            "results/verify-<agent_id>.jsonl; ignored in startup mode, which "
+            "uses a temporary file."
+        ),
     )
     parser.add_argument(
         "--keep-artifacts",
@@ -117,16 +161,30 @@ def configure_parser(parser: ArgumentParser) -> None:
 
 def execute(args: Namespace) -> int:
     load_project_environment(args.env_file)
+    benchmark = args.mode == BENCHMARK_MODE
     kwargs: dict[str, object] = {
-        "input_count": args.inputs,
+        "input_count": args.inputs
+        if args.inputs is not None
+        else (DEFAULT_BENCHMARK_INPUT_COUNT if benchmark else DEFAULT_INPUT_COUNT),
         "keep_artifacts": args.keep_artifacts,
     }
+    if benchmark:
+        kwargs["mode"] = args.mode
+        # Grading synthetic replies is meaningless, so benchmark mode implies a
+        # live model unless the caller named a different one.
+        kwargs["model_source"] = (
+            LIVE_SOURCE if args.model_source == OFFLINE_SOURCE else args.model_source
+        )
+    elif args.model_source != OFFLINE_SOURCE:
+        kwargs["model_source"] = args.model_source
+    if args.provider_model is not None:
+        kwargs["provider_model"] = args.provider_model
+    if args.output is not None:
+        kwargs["output_path"] = args.output
     if args.as_json:
         kwargs["as_json"] = True
     if args.input is not None:
         kwargs["probe_text"] = _probe_text(args.input)
-    if args.model_source != OFFLINE_SOURCE:
-        kwargs["model_source"] = args.model_source
     if args.model is not None:
         kwargs["model"] = args.model
     if args.llm_trace != "off":
@@ -145,24 +203,30 @@ def verify(
     keep_artifacts: bool = False,
     output_fn: Callable[[str], None] = print,
     offline: VerifyRuntime | None = None,
+    mode: VerifyMode = STARTUP_MODE,
     model_source: ModelSource = OFFLINE_SOURCE,
     model: str | None = None,
+    provider_model: str | None = None,
+    output_path: str | Path | None = None,
     llm_trace: str = "off",
     llm_trace_max_bytes: int = DEFAULT_TRACE_MAX_BYTES,
     as_json: bool = False,
 ) -> int:
-    """Start one Agent and confirm its model traffic is observable.
+    """Run one Agent through a real SDK Run without any DefuzeX credentials.
 
-    The DefuzeX SDK owns the Run, as it does for ``run`` and ``certify``; only the
-    Case and Judge Providers are local, which is what selects the SDK's local mode
-    and leaves it with no Backend to call. ``DEFUZEX_API_KEY`` is never read and
-    the Registry is never written, whichever model source is selected.
+    The SDK owns the Run in both modes, exactly as it does for ``run`` and
+    ``certify``; only the Case and Judge Provider ports are local, which is what
+    selects the SDK's local mode and leaves it with no Backend to call.
+    ``DEFUZEX_API_KEY`` is never read and the Registry is never written.
 
-    A pass means the adapter and runtime are healthy, not that the Agent answered
-    well: the local Judge only checks that every Input was answered at all. That
-    is the only defensible verdict under the default offline source, where replies
-    come from a mock model. ``model_source="deepseek"`` produces real replies, at
-    the cost of opening network egress and needing ``DEEPSEEK_API_KEY``.
+    In ``startup`` mode the Case is a fixed probe and the Judge only asks whether
+    every Input came back answered. That is the only defensible verdict when
+    replies come from the offline mock, and it is cheap enough to repeat.
+
+    In ``benchmark`` mode the flow is ``certify``'s: a Case is generated from the
+    Agent's requirement, the Agent answers it with a real model, and the Run is
+    graded against the behaviors the requirement declared. What differs from
+    ``certify`` is only who writes the Case and who grades it.
     """
 
     # In JSON mode nothing may reach stdout before the document itself.
@@ -184,15 +248,20 @@ def verify(
                 max_inputs=input_count,
                 probe_text=probe_text,
                 output_fn=stage_output,
+                mode=mode,
                 model_source=model_source,
                 model=model,
+                provider_model=provider_model,
                 llm_trace=llm_trace,
                 llm_trace_max_bytes=llm_trace_max_bytes,
                 activity_sink=llm_activity,
             )
-        except (InterceptionConfigurationError, ValueError) as exc:
-            # A misconfigured model source is the caller's mistake, not a verdict
-            # about the Agent, so it is reported before anything is built.
+        except Exception as exc:
+            # Assembly only reads configuration: an unsupported mode, a plaintext
+            # base URL, a missing provider credential. All of those are the
+            # caller's mistake rather than a verdict about the Agent, so they are
+            # reported as errors before an image is built. Catching broadly keeps
+            # the SDK's own error types out of this module's imports.
             return _fail_early(agent_id, str(exc), output_fn, as_json=as_json)
 
     print_header(agent_id, stage_output, runtime=offline)
@@ -202,6 +271,7 @@ def verify(
         llm_activity=llm_activity,
         stage_output=stage_output,
         keep_artifacts=keep_artifacts,
+        output_path=output_path,
     )
 
     if as_json:
@@ -238,16 +308,23 @@ def _run_verification(
     llm_activity: LLMActivity,
     stage_output: Callable[[str], None],
     keep_artifacts: bool,
+    output_path: str | Path | None = None,
 ) -> VerifyReport:
-    """Run the single Case and summarize it, cleaning up unless asked not to."""
+    """Run the Case and summarize it, cleaning up unless the log is worth keeping."""
 
-    artifact_dir = Path(tempfile.mkdtemp(prefix=ARTIFACT_PREFIX))
+    benchmark = offline.mode == BENCHMARK_MODE
+    # A graded Run is worth archiving, so benchmark mode writes where certify
+    # writes. A startup probe is not, so it stays in a directory that is removed.
+    artifact_dir = None if benchmark else Path(tempfile.mkdtemp(prefix=ARTIFACT_PREFIX))
+    keep = keep_artifacts or benchmark
     try:
         execution = run_benchmark_once(
-            # One Case keeps verification about startup, not benchmark coverage.
-            (replace(agent, case_count=1),),
+            # Startup asks about the Agent, not about coverage, so it always runs
+            # one Case. A benchmark honors the count the Registry declared, the
+            # same way certify does.
+            (agent if benchmark else replace(agent, case_count=1),),
             runner=offline.runner,
-            output_path=artifact_dir / f"verify-{_safe_name(agent.agent_id)}.jsonl",
+            output_path=_artifact_path(agent.agent_id, artifact_dir, output_path),
             output_fn=_discard,  # the sectioned report owns all verify output
             viewer_starter=None,
             llm_activity=llm_activity,
@@ -261,11 +338,30 @@ def _run_verification(
             agent_id=agent.agent_id,
             execution=execution,
             offline=offline,
-            keep_artifacts=keep_artifacts,
+            keep_artifacts=keep,
         )
     finally:
-        if not keep_artifacts:
+        if artifact_dir is not None and not keep:
             shutil.rmtree(artifact_dir, ignore_errors=True)
+
+
+def _artifact_path(
+    agent_id: str,
+    artifact_dir: Path | None,
+    output_path: str | Path | None,
+) -> Path:
+    if output_path is not None:
+        return Path(output_path)
+    name = f"verify-{_safe_name(agent_id)}.jsonl"
+    if artifact_dir is not None:
+        return artifact_dir / name
+    return _results_dir() / name
+
+
+def _results_dir() -> Path:
+    """The repository's results directory, matching where certify writes."""
+
+    return Path(DEFAULT_REGISTRY_PATH).resolve().parent.parent / "results"
 
 
 def _build_report(
@@ -291,6 +387,8 @@ def _build_report(
         "calls": offline.calls,
         "model_source": offline.model_source,
         "model": offline.model,
+        "mode": offline.mode,
+        "provider_model": offline.provider_model,
     }
     item = _agent_item(result, agent_id)
     if item is not None:
@@ -298,6 +396,7 @@ def _build_report(
             completed_cases=item.completed_case_count,
             requested_cases=item.requested_case_count,
             judge_status=_judge_status(item),
+            **_judgment_detail(item),
         )
 
     if item is None or not _started(item):
@@ -331,27 +430,87 @@ def _build_report(
     return VerifyReport(verdict=PASS, **common)  # type: ignore[arg-type]
 
 
-def _judge_status(item: SuiteAgentResult) -> str | None:
-    """The SDK report status, when the Run got far enough to produce one."""
+def _judgment_detail(item: SuiteAgentResult) -> dict[str, object]:
+    """Lift the Judge's own words out of every Case the Agent ran.
 
-    benchmark = item.benchmark
-    if benchmark is None or benchmark.report is None:
+    A verdict is only actionable with the reasoning behind it, and the SDK carries
+    anything beyond the standard report fields in ``extensions``. All Cases are
+    read, not just the last: an Agent that failed its first Case and passed its
+    second has not passed.
+    """
+
+    summaries: list[str] = []
+    issues: list[str] = []
+    steps: list[tuple[str, bool, str]] = []
+    multiple = len(item.benchmarks) > 1
+    for index, benchmark in enumerate(item.benchmarks, start=1):
+        report = benchmark.report
+        if report is None:
+            continue
+        prefix = f"case {index} " if multiple else ""
+        extensions = _extensions(report)
+        summary = str(extensions.get("summary") or "").strip()
+        if summary:
+            summaries.append(f"{prefix}{summary}" if prefix else summary)
+        issues.extend(f"{prefix}{_issue_text(issue)}" for issue in report.issues)
+        raw = extensions.get("step_results")
+        steps.extend(
+            (
+                f"{prefix}{entry.get('step_id') or '?'}".strip(),
+                bool(entry.get("passed")),
+                str(entry.get("reason") or "").strip(),
+            )
+            for entry in (raw if isinstance(raw, (list, tuple)) else ())
+            if isinstance(entry, Mapping)
+        )
+    return {
+        "judge_summary": " ".join(summaries) or None,
+        "judge_issues": tuple(issues),
+        "step_results": tuple(steps),
+    }
+
+
+def _extensions(report: object) -> Mapping[str, object]:
+    extensions = getattr(report, "extensions", None)
+    return extensions if isinstance(extensions, Mapping) else {}
+
+
+def _judge_status(item: SuiteAgentResult) -> str | None:
+    """The Agent's overall SDK status: the first Case that did not pass."""
+
+    statuses = [
+        benchmark.report.status
+        for benchmark in item.benchmarks
+        if benchmark.report is not None
+    ]
+    if not statuses:
         return None
-    return benchmark.report.status
+    for status in statuses:
+        if status != STATUS_PASS:
+            return status
+    return STATUS_PASS
 
 
 def _judge_rejection(item: SuiteAgentResult) -> str | None:
-    """Explain a non-passing Judgment, or None when the SDK passed the Run."""
+    """Explain the first non-passing Judgment, or None when every Case passed."""
 
-    benchmark = item.benchmark
-    if benchmark is None or benchmark.report is None:
+    if not item.benchmarks:
         return "The SDK Run finished without producing a report"
-    report = benchmark.report
-    if report.status == STATUS_PASS:
-        return None
-    detail = "; ".join(_issue_text(issue) for issue in report.issues)
-    summary = f"SDK Judge reported {report.status!r}"
-    return f"{summary}: {detail}" if detail else summary
+    for index, benchmark in enumerate(item.benchmarks, start=1):
+        report = benchmark.report
+        if report is None:
+            return f"Case {index} finished without producing a report"
+        if report.status == STATUS_PASS:
+            continue
+        where = f"Case {index}: " if len(item.benchmarks) > 1 else ""
+        headline = f"{where}SDK Judge reported {report.status!r}"
+        # The Judge's own summary reads better than a concatenation of issues,
+        # and the issues are printed in full just above the verdict anyway.
+        detail = str(_extensions(report).get("summary") or "").strip()
+        if not detail:
+            detail = "; ".join(_issue_text(issue) for issue in report.issues)
+        return f"{headline}: {detail}" if detail else headline
+    return None
 
 
 def _issue_text(issue: object) -> str:
@@ -433,13 +592,15 @@ def _safe_name(agent_id: str) -> str:
 
 FEATURE = CommandFeature(
     name="verify",
-    help="Check offline that one Agent starts and its model traffic is captured.",
+    help="Run one Agent through a real SDK Run using local Case and Judge Providers.",
     description=(
-        "Start one registered Agent with network egress blocked and locally "
-        "generated model replies, then confirm it responds and that every model "
-        "call is captured. Drives a real DefuzeX SDK Run through local Case and "
-        "Judge Providers, so it uses no DefuzeX or provider credentials and never "
-        "changes the Registry."
+        "Drive one registered Agent through the DefuzeX SDK with the Case and "
+        "Judge Provider ports supplied locally, so no DefuzeX credential is "
+        "needed and the Registry is never changed. 'startup' mode blocks network "
+        "egress, serves locally generated model replies, and checks only that the "
+        "Agent responds and its model calls are captured. 'benchmark' mode runs "
+        "the same flow as certify: a Case generated from the Agent's requirement, "
+        "answered with a real model, graded against the declared behaviors."
     ),
     configure=configure_parser,
     execute=execute,

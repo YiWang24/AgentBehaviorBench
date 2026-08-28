@@ -103,6 +103,60 @@ class TestModelSourceSelection:
                 environ={DEEPSEEK_API_KEY_ENV: "   "},
             )
 
+    def test_benchmark_mode_refuses_the_offline_source(self) -> None:
+        """Grading synthetic replies would say nothing about the Agent."""
+
+        with pytest.raises(ValueError, match="offline source"):
+            build_verify_runtime(
+                max_inputs=3,
+                output_fn=lambda _: None,
+                mode="benchmark",
+                model_source="offline",
+                environ=LIVE_ENV,
+            )
+
+    def test_benchmark_mode_needs_a_provider_credential(self) -> None:
+        with pytest.raises(Exception, match=DEEPSEEK_API_KEY_ENV):
+            build_verify_runtime(
+                max_inputs=3,
+                output_fn=lambda _: None,
+                mode="benchmark",
+                model_source="deepseek",
+                environ={},
+            )
+
+    def test_benchmark_mode_records_which_model_graded_the_run(self) -> None:
+        runtime = build_verify_runtime(
+            max_inputs=3,
+            output_fn=lambda _: None,
+            mode="benchmark",
+            model_source="deepseek",
+            provider_model="deepseek-reasoner",
+            environ=LIVE_ENV,
+        )
+
+        assert runtime.mode == "benchmark"
+        assert runtime.provider_model == "deepseek-reasoner"
+        # The Agent's model and the grading model are separate choices.
+        assert runtime.model == DEFAULT_DEEPSEEK_MODEL
+
+    def test_startup_mode_names_no_grading_model(self) -> None:
+        runtime = build_verify_runtime(
+            max_inputs=1, output_fn=lambda _: None, environ={}
+        )
+
+        assert runtime.mode == "startup"
+        assert runtime.provider_model is None
+
+    def test_an_unknown_mode_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="verify mode"):
+            build_verify_runtime(
+                max_inputs=1,
+                output_fn=lambda _: None,
+                mode="vibes",  # type: ignore[arg-type]
+                environ={},
+            )
+
     def test_an_unknown_source_is_rejected(self) -> None:
         with pytest.raises(ValueError, match="model source"):
             build_verify_runtime(

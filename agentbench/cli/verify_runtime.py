@@ -50,6 +50,13 @@ ModelSource = Literal["offline", "deepseek"]
 MODEL_SOURCES: tuple[ModelSource, ...] = ("offline", "deepseek")
 
 OFFLINE_SOURCE: ModelSource = "offline"
+LIVE_SOURCE: ModelSource = "deepseek"
+
+VerifyMode = Literal["startup", "benchmark"]
+VERIFY_MODES: tuple[VerifyMode, ...] = ("startup", "benchmark")
+
+STARTUP_MODE: VerifyMode = "startup"
+BENCHMARK_MODE: VerifyMode = "benchmark"
 
 
 @dataclass(frozen=True)
@@ -62,6 +69,10 @@ class VerifyRuntime:
     call_recorder: CallRecorder
     model_source: ModelSource = OFFLINE_SOURCE
     model: str = OFFLINE_MODEL
+    mode: VerifyMode = STARTUP_MODE
+    # The model that wrote the Case and graded the Run, which is a different
+    # question from the model the Agent itself talked to.
+    provider_model: str | None = None
 
     @property
     def captured_pair_count(self) -> int:
@@ -89,11 +100,13 @@ def build_verify_runtime(
     max_inputs: int,
     probe_text: str = DEFAULT_PROBE_TEXT,
     output_fn: Callable[[str], None],
+    mode: VerifyMode = STARTUP_MODE,
     model_source: ModelSource = OFFLINE_SOURCE,
     llm_trace: str = "off",
     llm_trace_max_bytes: int = DEFAULT_TRACE_MAX_BYTES,
     activity_sink: TraceSink | None = None,
     model: str | None = None,
+    provider_model: str | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> VerifyRuntime:
     """Wire a runner that needs no DefuzeX credentials, online or offline."""
@@ -102,6 +115,14 @@ def build_verify_runtime(
         raise ValueError(f"Unsupported LLM trace mode: {llm_trace!r}")
     if model_source not in MODEL_SOURCES:
         raise ValueError(f"Unsupported model source: {model_source!r}")
+    if mode not in VERIFY_MODES:
+        raise ValueError(f"Unsupported verify mode: {mode!r}")
+    if mode == BENCHMARK_MODE and model_source == OFFLINE_SOURCE:
+        raise ValueError(
+            "Benchmark mode grades what the Agent actually said, and the offline "
+            "source answers every request with the same synthetic text. Pass "
+            f"--model-source {LIVE_SOURCE}, or use --mode {STARTUP_MODE}."
+        )
 
     values = os.environ if environ is None else environ
     provider, egress, overlay, label = _model_plan(model_source, model, values)
@@ -134,17 +155,64 @@ def build_verify_runtime(
         # The SDK itself owns the Run: only the Provider pair is local, which is
         # what keeps the whole path free of DefuzeX credentials and networking.
     )
+    runner, provider_label = _suite_runner(
+        mode,
+        benchmark_runner=benchmark_runner,
+        max_inputs=max_inputs,
+        probe_text=probe_text,
+        provider_model=provider_model,
+        environ=values,
+    )
     return VerifyRuntime(
-        runner=OfflineSuiteRunner(
-            benchmark_runner=benchmark_runner,
-            max_inputs=max_inputs,
-            probe_text=probe_text,
-        ),
+        runner=runner,
         trace_state=trace_state,
         secret_resolver=secret_resolver,
         call_recorder=call_recorder,
         model_source=model_source,
         model=label,
+        mode=mode,
+        provider_model=provider_label,
+    )
+
+
+def _suite_runner(
+    mode: VerifyMode,
+    *,
+    benchmark_runner: BenchmarkRunner,
+    max_inputs: int,
+    probe_text: str,
+    provider_model: str | None,
+    environ: Mapping[str, str],
+) -> tuple[SuiteRunner, str | None]:
+    """Pick which pair of Providers drives the Run.
+
+    Both branches leave the shared execution path untouched; only the two
+    Provider ports differ, which is what makes a local Run comparable to an
+    official one.
+    """
+
+    if mode == STARTUP_MODE:
+        return (
+            OfflineSuiteRunner(
+                benchmark_runner=benchmark_runner,
+                max_inputs=max_inputs,
+                probe_text=probe_text,
+            ),
+            None,
+        )
+
+    # Imported here because it pulls in the DefuzeX SDK, which the startup path
+    # and every Agent-only caller must keep out of their import graph.
+    from agentbench.harness.local import ChatModel, LocalBenchmarkSuiteRunner
+
+    chat = ChatModel.from_environment(environ, model=provider_model)
+    return (
+        LocalBenchmarkSuiteRunner(
+            benchmark_runner=benchmark_runner,
+            model=chat,
+            max_inputs=max_inputs,
+        ),
+        chat.model,
     )
 
 
@@ -251,13 +319,18 @@ class _CompositeTraceSink:
 
 
 __all__ = [
+    "BENCHMARK_MODE",
     "DEFAULT_DEEPSEEK_MODEL",
     "DEEPSEEK_API_KEY_ENV",
+    "LIVE_SOURCE",
     "MODEL_SOURCES",
     "OFFLINE_SOURCE",
     "OFFLINE_TARGET_PLUGIN",
     "OFFLINE_UPSTREAM_KEY_ENV",
+    "STARTUP_MODE",
+    "VERIFY_MODES",
     "ModelSource",
+    "VerifyMode",
     "VerifyRuntime",
     "build_verify_runtime",
 ]

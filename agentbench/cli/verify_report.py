@@ -73,6 +73,13 @@ class VerifyReport:
     judge_status: str | None = None
     model_source: str = "offline"
     model: str | None = None
+    mode: str = "startup"
+    # The model that wrote the Case and graded the Run, when one did.
+    provider_model: str | None = None
+    judge_summary: str | None = None
+    judge_issues: tuple[str, ...] = ()
+    # (step_id, passed, reason) per generated Input.
+    step_results: tuple[tuple[str, bool, str], ...] = ()
 
     @property
     def passed(self) -> bool:
@@ -99,7 +106,17 @@ class VerifyReport:
                     "completed": self.completed_cases,
                     "requested": self.requested_cases,
                 },
+                "mode": self.mode,
                 "sdk_judge_status": self.judge_status,
+                "judgment": {
+                    "provider_model": self.provider_model,
+                    "summary": self.judge_summary,
+                    "issues": list(self.judge_issues),
+                    "step_results": [
+                        {"step_id": step, "passed": passed, "reason": reason}
+                        for step, passed, reason in self.step_results
+                    ],
+                },
                 "model_calls": {
                     "source": self.model_source,
                     "model": self.model,
@@ -144,14 +161,17 @@ def _conditions(runtime: object | None) -> str:
     claiming otherwise rather than describe the default.
     """
 
-    shared = f"SDK local providers {SEPARATOR} no DefuzeX credentials"
+    mode = getattr(runtime, "mode", "startup") if runtime is not None else "startup"
+    shared = f"{mode} {SEPARATOR} SDK local providers {SEPARATOR} no DefuzeX credentials"
     if runtime is None or getattr(runtime, "offline", True):
         return f"{shared} {SEPARATOR} egress blocked {SEPARATOR} registry untouched"
     source = getattr(runtime, "model_source", "live")
     model = getattr(runtime, "model", "")
     label = f"{source}:{model}" if model else source
+    judge = getattr(runtime, "provider_model", None)
+    graded = "" if not judge else f" {SEPARATOR} judged by {judge}"
     return (
-        f"{shared} {SEPARATOR} live model {ANSI_YELLOW}{label}{ANSI_RESET} "
+        f"{shared} {SEPARATOR} live model {ANSI_YELLOW}{label}{ANSI_RESET}{graded} "
         f"{SEPARATOR} egress open {SEPARATOR} registry untouched"
     )
 
@@ -161,6 +181,8 @@ def print_report(report: VerifyReport, output_fn: Callable[[str], None]) -> None
 
     if report.calls:
         _print_calls(report.calls, output_fn)
+    if report.step_results or report.judge_issues:
+        _print_judgment(report, output_fn)
     if report.substituted_secrets:
         output_fn(
             f"  {ANSI_YELLOW}!{ANSI_RESET}  {'stubbed secrets':<{LABEL_WIDTH}}"
@@ -190,6 +212,26 @@ def _print_calls(
     output_fn("")
 
 
+def _print_judgment(report: VerifyReport, output_fn: Callable[[str], None]) -> None:
+    """Show what the Judge decided per Input, then anything it objected to.
+
+    A graded verdict is only actionable with the reasoning attached, so this sits
+    between the call list and the verdict rather than being folded into either.
+    """
+
+    for step_id, passed, reason in report.step_results:
+        mark = f"{ANSI_GREEN}{MARK_OK}{ANSI_RESET}" if passed else f"{ANSI_RED}{MARK_FAIL}{ANSI_RESET}"
+        output_fn(
+            f"  {mark}  {step_id:<{LABEL_WIDTH}}{truncate(reason, DETAIL_WIDTH - LABEL_WIDTH)}"
+        )
+    for issue in report.judge_issues:
+        head, *rest = textwrap.wrap(issue, DETAIL_WIDTH - 6) or [""]
+        output_fn(f"  {ANSI_YELLOW}!{ANSI_RESET}  {head}")
+        for line in rest:
+            output_fn(f"{'':<6}{line}")
+    output_fn("")
+
+
 def _visible_calls(
     calls: Sequence[CallRecord],
 ) -> list[CallRecord | None]:
@@ -214,6 +256,8 @@ def _print_verdict(report: VerifyReport, output_fn: Callable[[str], None]) -> No
             f"{pairs} model request/response pair{'' if pairs == 1 else 's'} captured"
             f"{judged}"
         )
+        if report.judge_summary:
+            detail = f"{detail}. {report.judge_summary}"
     else:
         badge = f"{ANSI_RED}{ANSI_BOLD}FAIL{ANSI_RESET}"
         detail = report.reason or "verification did not complete"

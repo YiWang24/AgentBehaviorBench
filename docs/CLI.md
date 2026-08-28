@@ -52,7 +52,7 @@ Current subcommands:
 | --- | --- |
 | `run` | Run all enabled Agents whose status is `ready`. |
 | `view` | Open an existing JSONL result in the local web viewer. |
-| `verify` | Check offline that one Agent starts and its model traffic is captured. Uses no credentials and no network. |
+| `verify` | Run one Agent through a real SDK Run with local Providers: a credential-free startup check, or a full graded benchmark. |
 | `certify` | Verify one `adapting` Agent can complete its requested Cases and promote it to `ready`. |
 
 `verify` is the only command that runs without `DEFUZEX_API_KEY`: it supplies its
@@ -193,9 +193,18 @@ Viewer action? [r rerun/q quit]:
 
 ### 4.1 What It Answers
 
-`verify` answers one question: **does this Agent start, respond, and is its model
-traffic observable?** It does not measure benchmark quality and it does not change
-the Registry.
+`verify` answers one of two questions, selected with `--mode`, and never changes
+the Registry:
+
+| `--mode` | Question | Case | Judge |
+| --- | --- | --- | --- |
+| `startup` (default) | Does this Agent run, and is its model traffic observable? | A fixed probe | Was every Input answered? |
+| `benchmark` | Does this Agent behave as its requirement says? | Generated from the requirement | Graded against the declared behaviors |
+
+`benchmark` runs **the same flow as `certify`** — the registry's Case count, a real
+model, an archived result log — with the local Provider pair in place of the
+official Case and Judge services. That is the point: it exercises the SDK the way
+an official run does, without a DefuzeX credential.
 
 The DefuzeX SDK drives the Run exactly as it does for `run` and `certify`: the
 same `create_run` call, the same strict `get_input`/`submit` handshake, the same
@@ -203,6 +212,38 @@ same `create_run` call, the same strict `get_input`/`submit` handshake, the same
 Judge Provider itself, which selects the SDK's **local Provider mode**. With a
 custom pair the SDK builds no Backend client at all, so no credential is resolved
 and no request leaves the process.
+
+### 4.2 How Benchmark Mode Generates Its Cases
+
+The official service receives three requirement sections and returns test prompts.
+Benchmark mode sends the same three to a local model and gets the same thing back:
+
+```
+resources/requirements/<agent_id>.md
+  agent_description        (front matter)
+  ## Production Use Scenario              → production_scenario
+  ## Behaviors to Test                    → behaviors_to_test
+  ## Known Limitations or Prohibited …    → prohibited_behaviors
+        ↓
+  LocalCaseProvider → DeepSeek → [{step_id, prompt} × N]
+        ↓
+  SDK normalize_case → Case (rubric carries the behavior spec forward)
+        ↓
+  the Agent answers each Input with a real model
+        ↓
+  LocalJudgeProvider → DeepSeek → {status, issues, step_results}
+        ↓
+  SDK normalize_report → TestReport
+```
+
+An official Case keeps its rubric private because the official Judge already knows
+it. A local Case publishes it, because that is the only channel a local Judge has.
+
+The quality of the generated Cases is therefore bounded by those three sections.
+A requirement written from a template produces generic Cases; a specific one
+produces Cases that actually discriminate.
+
+### 4.3 Model Sources
 
 Two things vary and nothing else does. The Case and Judge Providers are always
 local. The model replies come from either the offline mock or a real provider,
@@ -226,12 +267,13 @@ Under the default `offline` source the whole run is hermetic:
   target, synthesized from whatever tools or response format the request declares;
 - results go to a temporary file that is deleted unless `--keep-artifacts` is given.
 
-### 4.2 Syntax
+### 4.4 Syntax
 
 ```text
-agentbench verify [-h] [--env-file PATH] [--input TEXT] [--inputs N]
-                  [--keep-artifacts] [--json]
+agentbench verify [-h] [--env-file PATH] [--mode {startup,benchmark}]
+                  [--input TEXT] [--inputs N] [--keep-artifacts] [--json]
                   [--model-source {offline,deepseek}] [--model MODEL]
+                  [--provider-model MODEL] [--output PATH]
                   [--llm-trace {off,terminal}]
                   [--llm-trace-max-bytes BYTES] agent_id
 ```
@@ -241,16 +283,21 @@ python -m agentbench verify langgraph-customer-support-agent
 python -m agentbench verify swe-agent --inputs 3 --llm-trace terminal
 python -m agentbench verify swe-agent --input "@prompts\probe.txt" --keep-artifacts
 python -m agentbench verify swe-agent --model-source deepseek
+python -m agentbench verify langgraph-chat-agent --mode benchmark
+python -m agentbench verify swe-agent --mode benchmark --inputs 5
 ```
 
-### 4.3 Arguments
+### 4.5 Arguments
 
 | Argument | Required | Default | Description |
 | --- | --- | --- | --- |
 | `agent_id` | Yes | - | Registered Agent ID. Disabled Agents and any `status` are accepted. |
 | `--env-file PATH` | No | Repository `.env` | Load host defaults from another dotenv file. |
-| `--input TEXT` | No | Short generic prompt | Probe text, or `@PATH` to read it from a file. |
-| `--inputs N` | No | `1` | Number of probe inputs sent in the single Case. |
+| `--mode {startup,benchmark}` | No | `startup` | Which question to answer. `benchmark` needs `DEEPSEEK_API_KEY` and implies a live model source. |
+| `--input TEXT` | No | Short generic prompt | Probe text, or `@PATH` to read it from a file. Startup mode only. |
+| `--inputs N` | No | `1` / `3` | Startup probes, or Inputs to generate in benchmark mode. |
+| `--provider-model MODEL` | No | `DEEPSEEK_MODEL` | Model that writes the Case and grades the Run. Independent of `--model`. |
+| `--output PATH` | No | `results/verify-<agent_id>.jsonl` | Where to write the benchmark result log. Ignored in startup mode. |
 | `--keep-artifacts` | No | Delete | Keep the temporary result log and print its path. |
 | `--json` | No | Human report | Print one JSON summary and nothing else. |
 | `--model-source {offline,deepseek}` | No | `offline` | Where model replies come from. `deepseek` opens egress and needs `DEEPSEEK_API_KEY`. |
@@ -259,10 +306,11 @@ python -m agentbench verify swe-agent --model-source deepseek
 | `--llm-trace-max-bytes BYTES` | No | `262144` | Maximum captured bytes per request or response. |
 | `-h`, `--help` | No | - | Show `verify` help and exit. |
 
-Unlike `run` and `certify`, `verify` always runs exactly **one** Case regardless of
-the Agent's `case` field, because it checks startup rather than coverage.
+Startup mode always runs exactly **one** Case regardless of the Agent's `case`
+field, because it checks startup rather than coverage. Benchmark mode honors the
+declared count, the same way `run` and `certify` do.
 
-### 4.4 Agent Requirements
+### 4.6 Agent Requirements
 
 | Condition | Behavior |
 | --- | --- |
@@ -275,7 +323,7 @@ Secrets declared in `runtime.secret_env_keys` do not need real values. Missing o
 are replaced with deterministic placeholders and the substituted names are printed,
 so a stubbed secret never passes silently.
 
-### 4.5 Verdict
+### 4.7 Verdict
 
 Verification passes when all of the following hold:
 
@@ -284,17 +332,23 @@ Verification passes when all of the following hold:
 - the SDK Judge returns `pass`;
 - at least one complete `llm_request`/`llm_response` pair is captured.
 
-The local Judge grades only health, never quality: it reports an issue when an
-Input came back unanswered — a non-`completed` submission, or output that is empty
-— and passes anything else. That distinction matters, because the model replies
-come from a local mock, so the Agent's wording carries no signal worth grading. An
-Agent whose reply is poor still passes; an Agent that returns nothing does not.
+In **startup** mode the local Judge grades only health, never quality: it reports
+an issue when an Input came back unanswered — a non-`completed` submission, or
+output that is empty — and passes anything else. That distinction matters, because
+the model replies come from a local mock, so the Agent's wording carries no signal
+worth grading. An Agent whose reply is poor still passes; one that returns nothing
+does not.
+
+In **benchmark** mode the Judge grades behavior against the requirement, and the
+verdict is its verdict. Every Case must pass: an Agent that failed its first Case
+and passed its second has not passed. The report prints the per-Input decisions
+and the Judge's objections above the verdict.
 
 The SDK's own status is reported separately from the verdict, as `judge:` in the
 report and `sdk_judge_status` in the JSON. The two can differ: a Run the Judge
 passed still fails verification if none of its model traffic was observable.
 
-### 4.6 Report Layout
+### 4.8 Report Layout
 
 The report has four sections: what is being checked, which stages passed, what the
 model exchanged, and the verdict.
@@ -343,7 +397,7 @@ bodies mid-JSON — the previews in the report and the entries in the result log
 built from those same bytes, so both degrade to raw text. Leave it alone unless a
 specific oversized payload is the thing being investigated.
 
-### 4.7 Machine-Readable Output
+### 4.9 Machine-Readable Output
 
 `--json` prints one JSON document and suppresses every other line, so the exit code
 and the document are the whole contract:
@@ -354,7 +408,14 @@ and the document are the whole contract:
   "agent_id": "langgraph-customer-support-agent",
   "verdict": "pass",
   "cases": {"completed": 1, "requested": 1},
+  "mode": "startup",
   "sdk_judge_status": "pass",
+  "judgment": {
+    "provider_model": null,
+    "summary": null,
+    "issues": [],
+    "step_results": []
+  },
   "model_calls": {
     "source": "offline",
     "model": "offline-verify-model",
@@ -388,9 +449,11 @@ Judge grades the Run, while `verdict` also requires the model traffic to have be
 observable.
 
 `model_calls.source` and `model_calls.model` record which model actually answered,
-so an archived summary cannot be mistaken for the other mode.
+so an archived summary cannot be mistaken for the other mode. `judgment` is empty
+in startup mode and carries the grading model, its summary, its objections, and
+one entry per Input in benchmark mode.
 
-### 4.8 Live Model Notes
+### 4.10 Live Model Notes
 
 `--model-source deepseek` is useful when the offline mock's constant replies are
 what an Agent trips over — a graph that routes on reply content, or a framework
