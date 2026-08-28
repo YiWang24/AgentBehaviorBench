@@ -95,20 +95,19 @@ python -m pip install -e .\defuzeX_AgentBench
 
 ### Internal SDK Build
 
-This repository currently depends on the internal DefuzeX SDK `dev` branch.
-Until the SDK is published for normal package installation, if `Defuze-SDK` has
-not been cloned locally yet, clone it from the SDK `dev` branch
-(`https://github.com/DefuzeX-AI/Defuze-SDK/tree/dev`) next to
-`defuzeX_AgentBench`, then install it into the same `.venv`:
+This repository depends on the DefuzeX Python SDK, published as the KUMA SDK at
+`https://github.com/DefuzeX-AI/KUMA-DefuzeX`. Until it is available for normal
+package installation, clone it next to `defuzeX_AgentBench` and install it into
+the same `.venv`:
 
 ```powershell
 cd <workspace-root>
-git clone --branch dev --single-branch https://github.com/DefuzeX-AI/Defuze-SDK
-python -m pip install -e .\Defuze-SDK
+git clone https://github.com/DefuzeX-AI/KUMA-DefuzeX
+python -m pip install -e .\KUMA-DefuzeX
 python -m pip install -e .\defuzeX_AgentBench
 ```
 
-A typical source checkout has `Defuze-SDK` and `defuzeX_AgentBench` as sibling
+A typical source checkout has `KUMA-DefuzeX` and `defuzeX_AgentBench` as sibling
 directories under the same parent workspace, both installed in editable mode.
 
 > [!NOTE]
