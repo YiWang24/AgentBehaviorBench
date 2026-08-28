@@ -35,7 +35,7 @@ from agentbench.cli.verify_runtime import (
     STARTUP_MODE,
     VERIFY_MODES,
     ModelSource,
-    VerifyMode,
+    VerifyOptions,
     VerifyRuntime,
     build_verify_runtime,
 )
@@ -162,54 +162,49 @@ def configure_parser(parser: ArgumentParser) -> None:
 def execute(args: Namespace) -> int:
     load_project_environment(args.env_file)
     benchmark = args.mode == BENCHMARK_MODE
-    kwargs: dict[str, object] = {
-        "input_count": args.inputs
-        if args.inputs is not None
-        else (DEFAULT_BENCHMARK_INPUT_COUNT if benchmark else DEFAULT_INPUT_COUNT),
-        "keep_artifacts": args.keep_artifacts,
-    }
-    if benchmark:
-        kwargs["mode"] = args.mode
-        # Grading synthetic replies is meaningless, so benchmark mode implies a
-        # live model unless the caller named a different one.
-        kwargs["model_source"] = (
-            LIVE_SOURCE if args.model_source == OFFLINE_SOURCE else args.model_source
-        )
-    elif args.model_source != OFFLINE_SOURCE:
-        kwargs["model_source"] = args.model_source
-    if args.provider_model is not None:
-        kwargs["provider_model"] = args.provider_model
-    if args.output is not None:
-        kwargs["output_path"] = args.output
-    if args.as_json:
-        kwargs["as_json"] = True
-    if args.input is not None:
-        kwargs["probe_text"] = _probe_text(args.input)
-    if args.model is not None:
-        kwargs["model"] = args.model
-    if args.llm_trace != "off":
-        kwargs["llm_trace"] = args.llm_trace
-    if args.llm_trace_max_bytes != DEFAULT_TRACE_MAX_BYTES:
-        kwargs["llm_trace_max_bytes"] = args.llm_trace_max_bytes
-    return verify(args.agent_id, **kwargs)
+    return verify(
+        args.agent_id,
+        options=VerifyOptions(
+            input_count=(
+                args.inputs
+                if args.inputs is not None
+                else (
+                    DEFAULT_BENCHMARK_INPUT_COUNT if benchmark else DEFAULT_INPUT_COUNT
+                )
+            ),
+            probe_text=(
+                _probe_text(args.input)
+                if args.input is not None
+                else DEFAULT_PROBE_TEXT
+            ),
+            mode=args.mode,
+            # Grading synthetic replies is meaningless, so benchmark mode implies
+            # a live model unless the caller named a different one.
+            model_source=(
+                LIVE_SOURCE
+                if benchmark and args.model_source == OFFLINE_SOURCE
+                else args.model_source
+            ),
+            model=args.model,
+            provider_model=args.provider_model,
+            llm_trace=args.llm_trace,
+            llm_trace_max_bytes=args.llm_trace_max_bytes,
+        ),
+        keep_artifacts=args.keep_artifacts,
+        output_path=args.output,
+        as_json=args.as_json,
+    )
 
 
 def verify(
     agent_id: str,
     *,
+    options: VerifyOptions | None = None,
     registry_path: str | Path = DEFAULT_REGISTRY_PATH,
-    probe_text: str = DEFAULT_PROBE_TEXT,
-    input_count: int = DEFAULT_INPUT_COUNT,
     keep_artifacts: bool = False,
     output_fn: Callable[[str], None] = print,
     offline: VerifyRuntime | None = None,
-    mode: VerifyMode = STARTUP_MODE,
-    model_source: ModelSource = OFFLINE_SOURCE,
-    model: str | None = None,
-    provider_model: str | None = None,
     output_path: str | Path | None = None,
-    llm_trace: str = "off",
-    llm_trace_max_bytes: int = DEFAULT_TRACE_MAX_BYTES,
     as_json: bool = False,
 ) -> int:
     """Run one Agent through a real SDK Run without any DefuzeX credentials.
@@ -229,10 +224,11 @@ def verify(
     ``certify`` is only who writes the Case and who grades it.
     """
 
+    options = options or VerifyOptions()
     # In JSON mode nothing may reach stdout before the document itself.
     stage_output = _discard if as_json else output_fn
 
-    agent, rejection = _select_agent(agent_id, registry_path, input_count)
+    agent, rejection = _select_agent(agent_id, registry_path, options.input_count)
     if agent is None:
         return _fail_early(agent_id, rejection, output_fn, as_json=as_json)
 
@@ -245,15 +241,8 @@ def verify(
     if offline is None:
         try:
             offline = build_verify_runtime(
-                max_inputs=input_count,
-                probe_text=probe_text,
+                options,
                 output_fn=stage_output,
-                mode=mode,
-                model_source=model_source,
-                model=model,
-                provider_model=provider_model,
-                llm_trace=llm_trace,
-                llm_trace_max_bytes=llm_trace_max_bytes,
                 activity_sink=llm_activity,
             )
         except Exception as exc:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from agentbench.cli.verify_runtime import (
+    VerifyOptions,
     OFFLINE_TARGET_PLUGIN,
     OFFLINE_UPSTREAM_KEY_ENV,
     build_verify_runtime,
@@ -59,7 +60,7 @@ class TestDeepSeekProvider:
 class TestModelSourceSelection:
     def test_offline_blocks_egress_and_uses_a_synthetic_credential(self) -> None:
         runtime = build_verify_runtime(
-            max_inputs=1, output_fn=lambda _: None, environ={}
+            VerifyOptions(input_count=1), output_fn=lambda _: None, environ={}
         )
         docker = _docker_runtime(runtime)
 
@@ -71,9 +72,8 @@ class TestModelSourceSelection:
 
     def test_a_live_source_opens_egress_so_the_provider_is_reachable(self) -> None:
         runtime = build_verify_runtime(
-            max_inputs=1,
+            VerifyOptions(input_count=1, model_source="deepseek"),
             output_fn=lambda _: None,
-            model_source="deepseek",
             environ=LIVE_ENV,
         )
         docker = _docker_runtime(runtime)
@@ -88,18 +88,16 @@ class TestModelSourceSelection:
 
         with pytest.raises(InterceptionConfigurationError, match=DEEPSEEK_API_KEY_ENV):
             build_verify_runtime(
-                max_inputs=1,
+                VerifyOptions(input_count=1, model_source="deepseek"),
                 output_fn=lambda _: None,
-                model_source="deepseek",
                 environ={},
             )
 
     def test_a_blank_credential_counts_as_missing(self) -> None:
         with pytest.raises(InterceptionConfigurationError):
             build_verify_runtime(
-                max_inputs=1,
+                VerifyOptions(input_count=1, model_source="deepseek"),
                 output_fn=lambda _: None,
-                model_source="deepseek",
                 environ={DEEPSEEK_API_KEY_ENV: "   "},
             )
 
@@ -108,30 +106,28 @@ class TestModelSourceSelection:
 
         with pytest.raises(ValueError, match="offline source"):
             build_verify_runtime(
-                max_inputs=3,
+                VerifyOptions(input_count=3, mode="benchmark", model_source="offline"),
                 output_fn=lambda _: None,
-                mode="benchmark",
-                model_source="offline",
                 environ=LIVE_ENV,
             )
 
     def test_benchmark_mode_needs_a_provider_credential(self) -> None:
         with pytest.raises(Exception, match=DEEPSEEK_API_KEY_ENV):
             build_verify_runtime(
-                max_inputs=3,
+                VerifyOptions(input_count=3, mode="benchmark", model_source="deepseek"),
                 output_fn=lambda _: None,
-                mode="benchmark",
-                model_source="deepseek",
                 environ={},
             )
 
     def test_benchmark_mode_records_which_model_graded_the_run(self) -> None:
         runtime = build_verify_runtime(
-            max_inputs=3,
+            VerifyOptions(
+                input_count=3,
+                mode="benchmark",
+                model_source="deepseek",
+                provider_model="deepseek-reasoner",
+            ),
             output_fn=lambda _: None,
-            mode="benchmark",
-            model_source="deepseek",
-            provider_model="deepseek-reasoner",
             environ=LIVE_ENV,
         )
 
@@ -142,7 +138,7 @@ class TestModelSourceSelection:
 
     def test_startup_mode_names_no_grading_model(self) -> None:
         runtime = build_verify_runtime(
-            max_inputs=1, output_fn=lambda _: None, environ={}
+            VerifyOptions(input_count=1), output_fn=lambda _: None, environ={}
         )
 
         assert runtime.mode == "startup"
@@ -151,18 +147,16 @@ class TestModelSourceSelection:
     def test_an_unknown_mode_is_rejected(self) -> None:
         with pytest.raises(ValueError, match="verify mode"):
             build_verify_runtime(
-                max_inputs=1,
-                output_fn=lambda _: None,
-                mode="vibes",  # type: ignore[arg-type]
+                VerifyOptions(input_count=1, mode="vibes"),
+                output_fn=lambda _: None,  # type: ignore[arg-type]
                 environ={},
             )
 
     def test_an_unknown_source_is_rejected(self) -> None:
         with pytest.raises(ValueError, match="model source"):
             build_verify_runtime(
-                max_inputs=1,
-                output_fn=lambda _: None,
-                model_source="gpt5",  # type: ignore[arg-type]
+                VerifyOptions(input_count=1, model_source="gpt5"),
+                output_fn=lambda _: None,  # type: ignore[arg-type]
                 environ={},
             )
 
@@ -176,9 +170,8 @@ class TestModelSourceSelection:
                 return super().get(key, default)
 
         runtime = build_verify_runtime(
-            max_inputs=1,
+            VerifyOptions(input_count=1, model_source="deepseek"),
             output_fn=lambda _: None,
-            model_source="deepseek",
             environ=_Poisoned(LIVE_ENV),
         )
 

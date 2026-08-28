@@ -39,12 +39,14 @@ def main() -> int:
     def emit(line: str) -> None:
         lines.append(line)
 
-    offline = build_verify_runtime(max_inputs=PROBE_COUNT, output_fn=emit)
+    offline = build_verify_runtime(
+        VerifyOptions(input_count=PROBE_COUNT), output_fn=emit
+    )
     # The JSON summary is the contract worth asserting on; the human report is
     # free to change layout without breaking this check.
     exit_code = verify(
         agent_id,
-        input_count=PROBE_COUNT,
+        options=VerifyOptions(input_count=PROBE_COUNT),
         output_fn=emit,
         offline=offline,
         as_json=True,

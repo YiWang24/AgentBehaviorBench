@@ -8,6 +8,7 @@ import pytest
 from agentbench.cli.features.verify import verify
 from agentbench.cli.main import cli
 from agentbench.cli.verify_runtime import (
+    VerifyOptions,
     OFFLINE_TARGET_PLUGIN,
     OFFLINE_UPSTREAM_KEY_ENV,
     VerifyRuntime,
@@ -105,7 +106,17 @@ def test_cli_dispatches_verify_with_defaults(monkeypatch) -> None:
     monkeypatch.setattr("agentbench.cli.features.verify.verify", fake_verify)
 
     assert cli(["verify", "test-agent"]) == 0
-    assert calls == [("test-agent", {"input_count": 1, "keep_artifacts": False})]
+    assert calls == [
+        (
+            "test-agent",
+            {
+                "options": VerifyOptions(input_count=1),
+                "keep_artifacts": False,
+                "output_path": None,
+                "as_json": False,
+            },
+        )
+    ]
 
 
 def test_cli_dispatches_verify_options(monkeypatch) -> None:
@@ -138,11 +149,15 @@ def test_cli_dispatches_verify_options(monkeypatch) -> None:
         (
             "test-agent",
             {
-                "input_count": 2,
+                "options": VerifyOptions(
+                    input_count=2,
+                    probe_text="ping",
+                    llm_trace="terminal",
+                    llm_trace_max_bytes=4096,
+                ),
                 "keep_artifacts": True,
-                "probe_text": "ping",
-                "llm_trace": "terminal",
-                "llm_trace_max_bytes": 4096,
+                "output_path": None,
+                "as_json": False,
             },
         )
     ]
@@ -167,11 +182,12 @@ def test_cli_dispatches_a_live_model_source(monkeypatch) -> None:
         ]
     )
 
-    assert calls[0]["model_source"] == "deepseek"
-    assert calls[0]["model"] == "deepseek-reasoner"
+    options = calls[0]["options"]
+    assert options.model_source == "deepseek"
+    assert options.model == "deepseek-reasoner"
 
 
-def test_cli_omits_the_model_source_when_it_is_the_offline_default(monkeypatch) -> None:
+def test_cli_defaults_the_model_source_to_offline(monkeypatch) -> None:
     calls: list[dict[str, object]] = []
 
     monkeypatch.setattr(
@@ -181,7 +197,7 @@ def test_cli_omits_the_model_source_when_it_is_the_offline_default(monkeypatch) 
 
     cli(["verify", "test-agent"])
 
-    assert "model_source" not in calls[0]
+    assert calls[0]["options"].model_source == "offline"
 
 
 def test_a_misconfigured_model_source_is_reported_as_an_error(
@@ -194,9 +210,9 @@ def test_a_misconfigured_model_source_is_reported_as_an_error(
 
     exit_code = verify(
         DOCKER_AGENT_ID,
+        options=VerifyOptions(model_source="deepseek"),
         registry_path=_registry_path(repo_root),
         output_fn=output.append,
-        model_source="deepseek",
     )
 
     assert exit_code == 2
@@ -215,7 +231,7 @@ def test_cli_reads_probe_text_from_a_file(monkeypatch, tmp_path: Path) -> None:
 
     cli(["verify", "test-agent", "--input", f"@{probe}"])
 
-    assert calls[0]["probe_text"] == "from a file"
+    assert calls[0]["options"].probe_text == "from a file"
 
 
 # --- preflight rejections ----------------------------------------------------
@@ -256,8 +272,8 @@ def test_zero_inputs_is_rejected(repo_root: Path) -> None:
 
     exit_code = verify(
         DOCKER_AGENT_ID,
+        options=VerifyOptions(input_count=0),
         registry_path=_registry_path(repo_root),
-        input_count=0,
         output_fn=output.append,
         offline=_offline(),
     )
@@ -544,10 +560,8 @@ def test_requested_llm_trace_reaches_output_when_no_live_panel_owns_the_terminal
     silent_panel = LLMActivity(lambda _: None, live_updates=False)
 
     build_verify_runtime(
-        max_inputs=1,
-        probe_text="ping",
+        VerifyOptions(input_count=1, probe_text="ping", llm_trace="terminal"),
         output_fn=written.append,
-        llm_trace="terminal",
         activity_sink=silent_panel,
     )
     # The composite sink is what the runtime hands to Docker; drive it directly.
@@ -582,9 +596,7 @@ def test_offline_runtime_targets_the_offline_plugin_with_a_synthetic_credential(
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
 
     offline = build_verify_runtime(
-        max_inputs=1,
-        probe_text="ping",
-        output_fn=lambda _: None,
+        VerifyOptions(input_count=1, probe_text="ping"), output_fn=lambda _: None
     )
     docker_runtime = offline.runner._benchmark_runner._agent_runner._runtime_factory._docker_builder()
     target = docker_runtime._model_provider.resolve({})

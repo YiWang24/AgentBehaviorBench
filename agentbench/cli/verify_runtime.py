@@ -55,6 +55,9 @@ LIVE_SOURCE: ModelSource = "deepseek"
 VerifyMode = Literal["startup", "benchmark"]
 VERIFY_MODES: tuple[VerifyMode, ...] = get_args(VerifyMode)
 
+TraceMode = Literal["off", "terminal"]
+TRACE_MODES: tuple[TraceMode, ...] = get_args(TraceMode)
+
 STARTUP_MODE: VerifyMode = "startup"
 BENCHMARK_MODE: VerifyMode = "benchmark"
 
@@ -95,29 +98,48 @@ class VerifyRuntime:
         return self.model_source == OFFLINE_SOURCE
 
 
+@dataclass(frozen=True, slots=True)
+class VerifyOptions:
+    """What to verify and how, apart from where the report goes.
+
+    These travel together because ``verify`` reads almost none of them: it hands
+    them to :func:`build_verify_runtime`. Spelling them out on both meant every
+    new option had to be added in three places — two signatures and the call
+    between them — and a missed one silently kept its default.
+    """
+
+    input_count: int = 1
+    probe_text: str = DEFAULT_PROBE_TEXT
+    mode: VerifyMode = STARTUP_MODE
+    model_source: ModelSource = OFFLINE_SOURCE
+    model: str | None = None
+    provider_model: str | None = None
+    llm_trace: TraceMode = "off"
+    llm_trace_max_bytes: int = DEFAULT_TRACE_MAX_BYTES
+
+
 def build_verify_runtime(
+    options: VerifyOptions | None = None,
     *,
-    max_inputs: int,
-    probe_text: str = DEFAULT_PROBE_TEXT,
     output_fn: Callable[[str], None],
-    mode: VerifyMode = STARTUP_MODE,
-    model_source: ModelSource = OFFLINE_SOURCE,
-    llm_trace: str = "off",
-    llm_trace_max_bytes: int = DEFAULT_TRACE_MAX_BYTES,
     activity_sink: TraceSink | None = None,
-    model: str | None = None,
-    provider_model: str | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> VerifyRuntime:
-    """Wire a runner that needs no DefuzeX credentials, online or offline."""
+    """Wire a runner that needs no DefuzeX credentials, online or offline.
 
-    if llm_trace not in {"off", "terminal"}:
-        raise ValueError(f"Unsupported LLM trace mode: {llm_trace!r}")
-    if model_source not in MODEL_SOURCES:
-        raise ValueError(f"Unsupported model source: {model_source!r}")
-    if mode not in VERIFY_MODES:
-        raise ValueError(f"Unsupported verify mode: {mode!r}")
-    if mode == BENCHMARK_MODE and model_source == OFFLINE_SOURCE:
+    Options are validated here rather than in ``VerifyOptions`` so that a bad
+    combination still surfaces through ``verify``'s error path as a report, not
+    as a traceback from wherever the options happened to be constructed.
+    """
+
+    options = options or VerifyOptions()
+    if options.llm_trace not in TRACE_MODES:
+        raise ValueError(f"Unsupported LLM trace mode: {options.llm_trace!r}")
+    if options.model_source not in MODEL_SOURCES:
+        raise ValueError(f"Unsupported model source: {options.model_source!r}")
+    if options.mode not in VERIFY_MODES:
+        raise ValueError(f"Unsupported verify mode: {options.mode!r}")
+    if options.mode == BENCHMARK_MODE and options.model_source == OFFLINE_SOURCE:
         raise ValueError(
             "Benchmark mode grades what the Agent actually said, and the offline "
             "source answers every request with the same synthetic text. Pass "
@@ -125,7 +147,9 @@ def build_verify_runtime(
         )
 
     values = os.environ if environ is None else environ
-    provider, egress, overlay, label = _model_plan(model_source, model, values)
+    provider, egress, overlay, label = _model_plan(
+        options.model_source, options.model, values
+    )
 
     # Counting pairs here is independent of the runtime's own required-trace gate,
     # so the CLI can report how much model traffic verification actually observed.
@@ -145,10 +169,10 @@ def build_verify_runtime(
                             call_recorder,
                             activity_sink=activity_sink,
                             output_fn=output_fn,
-                            llm_trace=llm_trace,
+                            llm_trace=options.llm_trace,
                         )
                     ),
-                    trace_max_bytes=llm_trace_max_bytes,
+                    trace_max_bytes=options.llm_trace_max_bytes,
                 )
             )
         ),
@@ -156,11 +180,11 @@ def build_verify_runtime(
         # what keeps the whole path free of DefuzeX credentials and networking.
     )
     runner, provider_label = _suite_runner(
-        mode,
+        options.mode,
         benchmark_runner=benchmark_runner,
-        max_inputs=max_inputs,
-        probe_text=probe_text,
-        provider_model=provider_model,
+        max_inputs=options.input_count,
+        probe_text=options.probe_text,
+        provider_model=options.provider_model,
         environ=values,
     )
     return VerifyRuntime(
@@ -168,9 +192,9 @@ def build_verify_runtime(
         trace_state=trace_state,
         secret_resolver=secret_resolver,
         call_recorder=call_recorder,
-        model_source=model_source,
+        model_source=options.model_source,
         model=label,
-        mode=mode,
+        mode=options.mode,
         provider_model=provider_label,
     )
 
@@ -328,9 +352,11 @@ __all__ = [
     "OFFLINE_TARGET_PLUGIN",
     "OFFLINE_UPSTREAM_KEY_ENV",
     "STARTUP_MODE",
+    "TRACE_MODES",
     "VERIFY_MODES",
     "ModelSource",
     "VerifyMode",
+    "VerifyOptions",
     "VerifyRuntime",
     "build_verify_runtime",
 ]
