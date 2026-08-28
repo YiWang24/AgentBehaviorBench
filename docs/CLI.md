@@ -263,8 +263,19 @@ python -m agentbench verify swe-agent --model deepseek-reasoner --llm-trace term
 
 There is no flag for "preflight only": a host without a provider credential
 cannot reach the graded benchmark, so `verify <agent>` already stops there and
-reports PARTIAL. On a host that does have one, `--env-file /dev/null` asks the
-cheap question without spending tokens.
+reports PARTIAL. On a host that does have one, blanking the variable for a
+single run asks the cheap question without spending tokens:
+
+```powershell
+$env:DEEPSEEK_API_KEY=""; python -m agentbench verify swe-agent
+```
+
+```bash
+DEEPSEEK_API_KEY= python -m agentbench verify swe-agent
+```
+
+An empty value counts as set, so it survives `.env` loading — which is what
+makes this work even when the repository `.env` supplies a real key.
 
 ### 4.4 Agent Requirements
 
