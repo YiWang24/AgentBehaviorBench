@@ -23,8 +23,20 @@ class PreparedTargetRequest:
     payload: object
 
 
-class OpenRouterTarget:
-    name = "openrouter"
+@dataclass(frozen=True, slots=True)
+class OpenAICompatibleTarget:
+    """Rewrite an intercepted request onto an OpenAI-compatible endpoint.
+
+    Only the host, path, and model are replaced, so every provider that speaks the
+    OpenAI wire format shares this adapter. It is registered once per provider name
+    so an Agent manifest names the provider it is actually reaching.
+    """
+
+    name: str
+    # Providers differ in how much of the OpenAI surface they serve. Naming the
+    # subset here turns an unsupported protocol into one clear routing error,
+    # instead of a 404 from an endpoint the provider never published.
+    protocols: frozenset[str] | None = None
 
     _ENDPOINTS = {
         "openai-chat": "/chat/completions",
@@ -39,12 +51,13 @@ class OpenRouterTarget:
         route: Route,
         target: Target,
     ) -> PreparedTargetRequest:
-        try:
-            endpoint = self._ENDPOINTS[route.protocol_plugin]
-        except KeyError as exc:
+        protocol = route.protocol_plugin
+        supported = self.protocols is None or protocol in self.protocols
+        endpoint = self._ENDPOINTS.get(protocol)
+        if endpoint is None or not supported:
             raise TargetRoutingError(
-                f"OpenRouter does not support source protocol {route.protocol_plugin!r}"
-            ) from exc
+                f"{self.name} does not support source protocol {protocol!r}"
+            )
 
         content = getattr(request, "content", b"") or b""
         try:
@@ -58,7 +71,7 @@ class OpenRouterTarget:
         payload["model"] = target.model
         parsed = urlsplit(target.base_url)
         if parsed.scheme != "https" or not parsed.hostname:
-            raise TargetRoutingError("OpenRouter target base URL must use HTTPS")
+            raise TargetRoutingError(f"{self.name} target base URL must use HTTPS")
         base_path = parsed.path.rstrip("/")
         target_path = f"{base_path}{endpoint}"
 
@@ -88,4 +101,6 @@ class OpenRouterTarget:
         )
 
 
-OPENROUTER_TARGET = OpenRouterTarget()
+OPENROUTER_TARGET = OpenAICompatibleTarget("openrouter")
+# DeepSeek publishes only the chat endpoint; /responses and /messages 404 there.
+DEEPSEEK_TARGET = OpenAICompatibleTarget("deepseek", frozenset({"openai-chat"}))
