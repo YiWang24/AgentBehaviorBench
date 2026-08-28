@@ -231,15 +231,15 @@ container is started twice rather than shared.
 
 ```text
 agentbench verify [-h] [--env-file PATH] [--input TEXT] [--probes N]
-                  [--inputs N] [--preflight-only] [--model MODEL]
-                  [--provider-model MODEL] [--output PATH] [--json]
+                  [--inputs N] [--model MODEL] [--provider-model MODEL]
+                  [--output PATH] [--json]
                   [--llm-trace {off,terminal}]
                   [--llm-trace-max-bytes BYTES] agent_id
 ```
 
 ```powershell
 python -m agentbench verify langgraph-customer-support-agent
-python -m agentbench verify swe-agent --preflight-only --probes 3
+python -m agentbench verify swe-agent --probes 3
 python -m agentbench verify langgraph-chat-agent --inputs 5
 python -m agentbench verify swe-agent --model deepseek-reasoner --llm-trace terminal
 ```
@@ -253,7 +253,6 @@ python -m agentbench verify swe-agent --model deepseek-reasoner --llm-trace term
 | `--input TEXT` | No | Short generic prompt | Preflight probe text, or `@PATH` to read it from a file. |
 | `--probes N` | No | `1` | Preflight probes to send. |
 | `--inputs N` | No | `3` | Inputs to generate for the graded benchmark. |
-| `--preflight-only` | No | Run all phases | Stop after preflight. Needs no credential. |
 | `--model MODEL` | No | `DEEPSEEK_MODEL` | Model the Agent talks to during the benchmark. Preflight always answers from the interceptor. |
 | `--provider-model MODEL` | No | `DEEPSEEK_MODEL` | Model that writes the Case and grades the Run. Independent of `--model`. |
 | `--output PATH` | No | `results/verify-<agent_id>.jsonl` | Where to write the benchmark result log. Preflight writes no log. |
@@ -262,9 +261,10 @@ python -m agentbench verify swe-agent --model deepseek-reasoner --llm-trace term
 | `--llm-trace-max-bytes BYTES` | No | `262144` | Maximum captured bytes per request or response. |
 | `-h`, `--help` | No | - | Show `verify` help and exit. |
 
-`--preflight-only` is the check to repeat while adapting an Agent: it is the
-cheapest phase and answers the only question that matters before the Agent runs
-at all.
+There is no flag for "preflight only": a host without a provider credential
+cannot reach the graded benchmark, so `verify <agent>` already stops there and
+reports PARTIAL. On a host that does have one, `--env-file /dev/null` asks the
+cheap question without spending tokens.
 
 ### 4.4 Agent Requirements
 
@@ -384,9 +384,9 @@ it from nulls:
 }
 ```
 
-`providers.state` is `ready`, `unavailable`, or `skipped` — `unavailable` carries
-its reason, `skipped` means `--preflight-only`. `benchmark.ran` is `false` in
-both cases, and `result_log` is `null`, because only a graded Run is archived.
+`providers.state` is `ready` or `unavailable` — `unavailable` carries
+its reason. `benchmark.ran` is `false` then, and `result_log` is `null`, because
+only a graded Run is archived.
 
 ### 4.8 Model Notes
 
@@ -405,7 +405,8 @@ DeepSeek serves only the OpenAI **chat** wire format. An Agent whose manifest
 routes `openai-responses` or `anthropic-messages` traffic cannot be graded
 against it, and an Agent requesting JSON-schema `response_format` currently gets
 `400 This response_format type is unavailable now`. Those are provider limits,
-not adapter defects: `--preflight-only` still verifies such an Agent.
+not adapter defects: preflight still verifies such an Agent, and the run
+reports PARTIAL rather than failing it.
 
 ## 5. `certify`
 
