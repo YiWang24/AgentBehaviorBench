@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, get_args
 
 from agentbench.harness import AgentRunner, BenchmarkRunner, SuiteRunner
 from agentbench.harness.offline import (
@@ -47,13 +47,13 @@ OFFLINE_UPSTREAM_KEY_ENV = "DEFUZEX_OFFLINE_UPSTREAM_KEY"
 OFFLINE_UPSTREAM_KEY_VALUE = "offline-verify-no-upstream"
 
 ModelSource = Literal["offline", "deepseek"]
-MODEL_SOURCES: tuple[ModelSource, ...] = ("offline", "deepseek")
+MODEL_SOURCES: tuple[ModelSource, ...] = get_args(ModelSource)
 
 OFFLINE_SOURCE: ModelSource = "offline"
 LIVE_SOURCE: ModelSource = "deepseek"
 
 VerifyMode = Literal["startup", "benchmark"]
-VERIFY_MODES: tuple[VerifyMode, ...] = ("startup", "benchmark")
+VERIFY_MODES: tuple[VerifyMode, ...] = get_args(VerifyMode)
 
 STARTUP_MODE: VerifyMode = "startup"
 BENCHMARK_MODE: VerifyMode = "benchmark"
