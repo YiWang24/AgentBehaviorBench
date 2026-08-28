@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "primo-benchmark"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "langgraph>=0.2,<1",
+    "langchain>=0.3,<1",
+    "langchain-core>=0.3,<1",
+    "langchain-openai>=0.2,<1",
+    "langchain-anthropic>=0.2,<1",
+    "pandas>=2.0",
+    "numpy>=1.26",
+    # technical_indicators_tool uses the `ta` library for indicators.
+    "ta>=0.11",
+    "python-dotenv>=1.0",
+    # Not installed: yfinance, finnhub-python, firecrawl (the tools that use
+    # them are replaced), chromadb (not on the graph path).
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# config.py reads config.json from beside its module after install.
+[tool.setuptools.package-data]
+"src.config" = ["*.json"]

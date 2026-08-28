@@ -318,3 +318,12 @@ status = "adapting"
 framework = "langgraph"
 source = "https://github.com/51bitquant/ai-hedge-fund-crypto"
 case = 1
+
+[[agents]]
+agent_id = "primo-stock-analyst"
+path = "resources/agents/36-primo-stock-analyst"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/ivebotunac/PrimoAgent"
+case = 1
