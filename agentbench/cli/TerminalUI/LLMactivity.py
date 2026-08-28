@@ -281,17 +281,15 @@ class LLMActivity:
         both directions intact.
         """
 
-        latency = (
-            f"{float(call.latency_ms):.1f}ms"
-            if isinstance(call.latency_ms, (int, float))
-            else "-"
-        )
-        status = "FAILED" if call.error else (
-            str(call.status) if call.status is not None else "done"
-        )
+        if call.error:
+            status = "FAILED"
+        elif call.status is None:
+            status = "done"
+        else:
+            status = str(call.status)
         return (
             f"    LLM call {call.call_number:02d} | {call.provider} | "
-            f"{status} | {latency}",
+            f"{status} | {latency_text(call.latency_ms)}",
             f"      Agent > {call.request_preview}",
             f"      {self._model_text(call)}",
         )
@@ -331,6 +329,14 @@ class LLMActivity:
         self._latest_call_id = None
         self._call_count = 0
         self._stage_frame = 0
+
+
+def latency_text(latency_ms: object | None) -> str:
+    """Render a trace latency, which arrives untyped, or `-` when absent."""
+
+    if isinstance(latency_ms, (int, float)) and not isinstance(latency_ms, bool):
+        return f"{float(latency_ms):.1f}ms"
+    return "-"
 
 
 def event_preview(event: TraceEvent, limit: int) -> str:
@@ -467,4 +473,4 @@ def _normalize(text: str) -> str:
     return " ".join(text.split())
 
 
-__all__ = ["LLMActivity", "PREVIEW_CHAR_LIMIT", "event_preview"]
+__all__ = ["PREVIEW_CHAR_LIMIT", "LLMActivity", "event_preview", "latency_text"]
