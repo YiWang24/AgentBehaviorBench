@@ -23,8 +23,16 @@ class PreparedTargetRequest:
     payload: object
 
 
-class OpenRouterTarget:
-    name = "openrouter"
+@dataclass(frozen=True, slots=True)
+class OpenAICompatibleTarget:
+    """Rewrite an intercepted request onto an OpenAI-compatible endpoint.
+
+    Only the host, path, and model are replaced, so every provider that speaks the
+    OpenAI wire format shares this adapter. It is registered once per provider name
+    so an Agent manifest names the provider it is actually reaching.
+    """
+
+    name: str
 
     _ENDPOINTS = {
         "openai-chat": "/chat/completions",
@@ -43,7 +51,8 @@ class OpenRouterTarget:
             endpoint = self._ENDPOINTS[route.protocol_plugin]
         except KeyError as exc:
             raise TargetRoutingError(
-                f"OpenRouter does not support source protocol {route.protocol_plugin!r}"
+                f"{self.name} does not support source protocol "
+                f"{route.protocol_plugin!r}"
             ) from exc
 
         content = getattr(request, "content", b"") or b""
@@ -58,7 +67,7 @@ class OpenRouterTarget:
         payload["model"] = target.model
         parsed = urlsplit(target.base_url)
         if parsed.scheme != "https" or not parsed.hostname:
-            raise TargetRoutingError("OpenRouter target base URL must use HTTPS")
+            raise TargetRoutingError(f"{self.name} target base URL must use HTTPS")
         base_path = parsed.path.rstrip("/")
         target_path = f"{base_path}{endpoint}"
 
@@ -88,4 +97,5 @@ class OpenRouterTarget:
         )
 
 
-OPENROUTER_TARGET = OpenRouterTarget()
+OPENROUTER_TARGET = OpenAICompatibleTarget("openrouter")
+DEEPSEEK_TARGET = OpenAICompatibleTarget("deepseek")

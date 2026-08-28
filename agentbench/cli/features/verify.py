@@ -17,11 +17,18 @@ from agentbench.runtime.agentcontainer import runtime_type
 from agentbench.runtime.interception import (
     DEFAULT_TRACE_MAX_BYTES,
     InterceptionConfig,
+    InterceptionConfigurationError,
 )
 
 from agentbench.cli.environment import load_project_environment
 from agentbench.cli.execution import BenchmarkExecution, run_benchmark_once
-from agentbench.cli.offline_runtime import OfflineRuntime, build_offline_runtime
+from agentbench.cli.verify_runtime import (
+    MODEL_SOURCES,
+    OFFLINE_SOURCE,
+    ModelSource,
+    VerifyRuntime,
+    build_verify_runtime,
+)
 from agentbench.cli.TerminalUI import LLMActivity
 from agentbench.cli.verify_report import (
     ERROR,
@@ -75,6 +82,25 @@ def configure_parser(parser: ArgumentParser) -> None:
         help="Print one JSON summary instead of the human report.",
     )
     parser.add_argument(
+        "--model-source",
+        choices=MODEL_SOURCES,
+        default=OFFLINE_SOURCE,
+        help=(
+            "Where model replies come from. 'offline' (default) synthesizes them "
+            "inside the interceptor with network egress blocked and needs no "
+            "credential. 'deepseek' calls the real provider, which opens egress "
+            "and requires DEEPSEEK_API_KEY."
+        ),
+    )
+    parser.add_argument(
+        "--model",
+        metavar="MODEL",
+        help=(
+            "Model slug for the selected source; defaults to DEEPSEEK_MODEL or "
+            "deepseek-chat when --model-source is deepseek."
+        ),
+    )
+    parser.add_argument(
         "--llm-trace",
         choices=("off", "terminal"),
         default="off",
@@ -99,6 +125,10 @@ def execute(args: Namespace) -> int:
         kwargs["as_json"] = True
     if args.input is not None:
         kwargs["probe_text"] = _probe_text(args.input)
+    if args.model_source != OFFLINE_SOURCE:
+        kwargs["model_source"] = args.model_source
+    if args.model is not None:
+        kwargs["model"] = args.model
     if args.llm_trace != "off":
         kwargs["llm_trace"] = args.llm_trace
     if args.llm_trace_max_bytes != DEFAULT_TRACE_MAX_BYTES:
@@ -114,21 +144,25 @@ def verify(
     input_count: int = DEFAULT_INPUT_COUNT,
     keep_artifacts: bool = False,
     output_fn: Callable[[str], None] = print,
-    offline: OfflineRuntime | None = None,
+    offline: VerifyRuntime | None = None,
+    model_source: ModelSource = OFFLINE_SOURCE,
+    model: str | None = None,
     llm_trace: str = "off",
     llm_trace_max_bytes: int = DEFAULT_TRACE_MAX_BYTES,
     as_json: bool = False,
 ) -> int:
-    """Start one Agent offline and confirm its model traffic is observable.
+    """Start one Agent and confirm its model traffic is observable.
 
     The DefuzeX SDK owns the Run, as it does for ``run`` and ``certify``; only the
     Case and Judge Providers are local, which is what selects the SDK's local mode
-    and leaves it with no Backend to call. Nothing here reads ``DEFUZEX_API_KEY``
-    or ``OPENROUTER_API_KEY``, reaches a network, or writes the Registry.
+    and leaves it with no Backend to call. ``DEFUZEX_API_KEY`` is never read and
+    the Registry is never written, whichever model source is selected.
 
-    A pass means the adapter and runtime are healthy. It says nothing about
-    benchmark quality: replies come from a local mock model, so the local Judge
-    only checks that every Input was answered at all.
+    A pass means the adapter and runtime are healthy, not that the Agent answered
+    well: the local Judge only checks that every Input was answered at all. That
+    is the only defensible verdict under the default offline source, where replies
+    come from a mock model. ``model_source="deepseek"`` produces real replies, at
+    the cost of opening network egress and needing ``DEEPSEEK_API_KEY``.
     """
 
     # In JSON mode nothing may reach stdout before the document itself.
@@ -138,24 +172,33 @@ def verify(
     if agent is None:
         return _fail_early(agent_id, rejection, output_fn, as_json=as_json)
 
-    print_header(agent_id, stage_output)
     # The live panel is wanted on a terminal, but its non-interactive fallback would
     # duplicate what the sectioned report already prints, so that path is silenced.
     llm_activity = LLMActivity(
         _discard,
         live_updates=not as_json and sys.stdout.isatty(),
     )
+    if offline is None:
+        try:
+            offline = build_verify_runtime(
+                max_inputs=input_count,
+                probe_text=probe_text,
+                output_fn=stage_output,
+                model_source=model_source,
+                model=model,
+                llm_trace=llm_trace,
+                llm_trace_max_bytes=llm_trace_max_bytes,
+                activity_sink=llm_activity,
+            )
+        except (InterceptionConfigurationError, ValueError) as exc:
+            # A misconfigured model source is the caller's mistake, not a verdict
+            # about the Agent, so it is reported before anything is built.
+            return _fail_early(agent_id, str(exc), output_fn, as_json=as_json)
+
+    print_header(agent_id, stage_output, runtime=offline)
     report = _run_verification(
         agent=agent,
-        offline=offline
-        or build_offline_runtime(
-            max_inputs=input_count,
-            probe_text=probe_text,
-            output_fn=stage_output,
-            llm_trace=llm_trace,
-            llm_trace_max_bytes=llm_trace_max_bytes,
-            activity_sink=llm_activity,
-        ),
+        offline=offline,
         llm_activity=llm_activity,
         stage_output=stage_output,
         keep_artifacts=keep_artifacts,
@@ -191,7 +234,7 @@ def _select_agent(
 def _run_verification(
     *,
     agent: AgentRegistration,
-    offline: OfflineRuntime,
+    offline: VerifyRuntime,
     llm_activity: LLMActivity,
     stage_output: Callable[[str], None],
     keep_artifacts: bool,
@@ -229,7 +272,7 @@ def _build_report(
     *,
     agent_id: str,
     execution: BenchmarkExecution,
-    offline: OfflineRuntime,
+    offline: VerifyRuntime,
     keep_artifacts: bool,
 ) -> VerifyReport:
     """Turn the suite outcome into a startup verdict."""
@@ -246,6 +289,8 @@ def _build_report(
         "substituted_secrets": offline.substituted_secrets,
         "result_log": log_path,
         "calls": offline.calls,
+        "model_source": offline.model_source,
+        "model": offline.model,
     }
     item = _agent_item(result, agent_id)
     if item is not None:

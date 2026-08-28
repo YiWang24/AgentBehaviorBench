@@ -71,6 +71,8 @@ class VerifyReport:
     # command's verdict: the Judge can pass a Run whose model traffic verify
     # still rejects as unobservable.
     judge_status: str | None = None
+    model_source: str = "offline"
+    model: str | None = None
 
     @property
     def passed(self) -> bool:
@@ -99,6 +101,8 @@ class VerifyReport:
                 },
                 "sdk_judge_status": self.judge_status,
                 "model_calls": {
+                    "source": self.model_source,
+                    "model": self.model,
                     "captured_pairs": self.captured_pairs,
                     "calls": [
                         {
@@ -121,14 +125,35 @@ class VerifyReport:
         )
 
 
-def print_header(agent_id: str, output_fn: Callable[[str], None]) -> None:
+def print_header(
+    agent_id: str,
+    output_fn: Callable[[str], None],
+    *,
+    runtime: object | None = None,
+) -> None:
     output_fn("")
     output_fn(f"{ANSI_BOLD}verify{ANSI_RESET} {SEPARATOR} {ANSI_BOLD}{agent_id}{ANSI_RESET}")
-    output_fn(
-        f"       SDK local providers {SEPARATOR} no credentials {SEPARATOR} "
-        f"egress blocked {SEPARATOR} registry untouched"
-    )
+    output_fn(f"       {_conditions(runtime)}")
     output_fn("")
+
+
+def _conditions(runtime: object | None) -> str:
+    """State the run's actual guarantees, which the model source changes.
+
+    A live source spends money and reaches the network, so the subtitle must stop
+    claiming otherwise rather than describe the default.
+    """
+
+    shared = f"SDK local providers {SEPARATOR} no DefuzeX credentials"
+    if runtime is None or getattr(runtime, "offline", True):
+        return f"{shared} {SEPARATOR} egress blocked {SEPARATOR} registry untouched"
+    source = getattr(runtime, "model_source", "live")
+    model = getattr(runtime, "model", "")
+    label = f"{source}:{model}" if model else source
+    return (
+        f"{shared} {SEPARATOR} live model {ANSI_YELLOW}{label}{ANSI_RESET} "
+        f"{SEPARATOR} egress open {SEPARATOR} registry untouched"
+    )
 
 
 def print_report(report: VerifyReport, output_fn: Callable[[str], None]) -> None:

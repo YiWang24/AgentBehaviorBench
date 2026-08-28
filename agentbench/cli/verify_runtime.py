@@ -1,10 +1,18 @@
-"""Assemble a fully offline benchmark runner for startup verification."""
+"""Assemble the benchmark runner that `verify` drives.
+
+Two axes vary here and nothing else does. The Case and Judge Providers are always
+local, which is what keeps ``DEFUZEX_API_KEY`` out of every verification. The model
+replies are either synthesized inside the interceptor with egress blocked, or
+fetched from a real provider with egress open. Everything downstream — the SDK Run,
+the handshake, the trace sinks, the call recorder — is identical either way.
+"""
 
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from typing import Literal
 
 from agentbench.harness import AgentRunner, BenchmarkRunner, SuiteRunner
 from agentbench.harness.offline import (
@@ -15,10 +23,16 @@ from agentbench.harness.offline import (
 from agentbench.cli.TerminalUI.call_log import CallRecord, CallRecorder
 from agentbench.runtime import RuntimeFactory
 from agentbench.runtime.docker import DockerRuntime
+from agentbench.runtime.docker.runtime import EgressMode
 from agentbench.runtime.interception import (
+    DEEPSEEK_API_KEY_ENV,
+    DEFAULT_DEEPSEEK_MODEL,
     DEFAULT_TRACE_MAX_BYTES,
+    DeepSeekProvider,
+    InterceptionConfigurationError,
     InterceptionTraceState,
     ModelTargetConfig,
+    ModelTargetProvider,
     StaticModelTargetProvider,
     TerminalTraceSink,
     TraceEvent,
@@ -32,15 +46,22 @@ OFFLINE_MODEL = "offline-verify-model"
 OFFLINE_UPSTREAM_KEY_ENV = "DEFUZEX_OFFLINE_UPSTREAM_KEY"
 OFFLINE_UPSTREAM_KEY_VALUE = "offline-verify-no-upstream"
 
+ModelSource = Literal["offline", "deepseek"]
+MODEL_SOURCES: tuple[ModelSource, ...] = ("offline", "deepseek")
+
+OFFLINE_SOURCE: ModelSource = "offline"
+
 
 @dataclass(frozen=True)
-class OfflineRuntime:
+class VerifyRuntime:
     """The runner plus the handles the CLI needs to report on a verification."""
 
     runner: SuiteRunner
     trace_state: InterceptionTraceState
     secret_resolver: OfflineSecretResolver
     call_recorder: CallRecorder
+    model_source: ModelSource = OFFLINE_SOURCE
+    model: str = OFFLINE_MODEL
 
     @property
     def captured_pair_count(self) -> int:
@@ -58,38 +79,45 @@ class OfflineRuntime:
     def substituted_secrets(self) -> tuple[str, ...]:
         return self.secret_resolver.substituted
 
+    @property
+    def offline(self) -> bool:
+        return self.model_source == OFFLINE_SOURCE
 
-def build_offline_runtime(
+
+def build_verify_runtime(
     *,
     max_inputs: int,
     probe_text: str = DEFAULT_PROBE_TEXT,
     output_fn: Callable[[str], None],
+    model_source: ModelSource = OFFLINE_SOURCE,
     llm_trace: str = "off",
     llm_trace_max_bytes: int = DEFAULT_TRACE_MAX_BYTES,
     activity_sink: TraceSink | None = None,
     model: str | None = None,
-) -> OfflineRuntime:
-    """Wire a runner that reaches no network and needs no official credentials."""
+    environ: Mapping[str, str] | None = None,
+) -> VerifyRuntime:
+    """Wire a runner that needs no DefuzeX credentials, online or offline."""
 
     if llm_trace not in {"off", "terminal"}:
         raise ValueError(f"Unsupported LLM trace mode: {llm_trace!r}")
+    if model_source not in MODEL_SOURCES:
+        raise ValueError(f"Unsupported model source: {model_source!r}")
+
+    values = os.environ if environ is None else environ
+    provider, egress, overlay, label = _model_plan(model_source, model, values)
 
     # Counting pairs here is independent of the runtime's own required-trace gate,
     # so the CLI can report how much model traffic verification actually observed.
     trace_state = InterceptionTraceState()
     call_recorder = CallRecorder()
-    # The offline target never contacts a provider, so its credential is synthetic.
-    # Seeding it here keeps it out of the resolver's substituted-secret report,
-    # which is reserved for genuinely missing Agent configuration.
-    secret_resolver = OfflineSecretResolver(
-        {**os.environ, OFFLINE_UPSTREAM_KEY_ENV: OFFLINE_UPSTREAM_KEY_VALUE}
-    )
+    secret_resolver = OfflineSecretResolver({**values, **overlay})
     benchmark_runner = BenchmarkRunner(
         agent_runner=AgentRunner(
             runtime_factory=RuntimeFactory(
-                docker_builder=_OfflineDockerBuilder(
+                docker_builder=_VerifyDockerBuilder(
                     secret_resolver=secret_resolver,
-                    target=_offline_target(model),
+                    model_provider=provider,
+                    egress=egress,
                     trace_sink=_CompositeTraceSink(
                         _trace_sinks(
                             trace_state,
@@ -106,7 +134,7 @@ def build_offline_runtime(
         # The SDK itself owns the Run: only the Provider pair is local, which is
         # what keeps the whole path free of DefuzeX credentials and networking.
     )
-    return OfflineRuntime(
+    return VerifyRuntime(
         runner=OfflineSuiteRunner(
             benchmark_runner=benchmark_runner,
             max_inputs=max_inputs,
@@ -115,6 +143,41 @@ def build_offline_runtime(
         trace_state=trace_state,
         secret_resolver=secret_resolver,
         call_recorder=call_recorder,
+        model_source=model_source,
+        model=label,
+    )
+
+
+def _model_plan(
+    model_source: ModelSource,
+    model: str | None,
+    environ: Mapping[str, str],
+) -> tuple[ModelTargetProvider, EgressMode, Mapping[str, str], str]:
+    """Choose the target, the egress policy, and any synthetic credential."""
+
+    if model_source == OFFLINE_SOURCE:
+        target = _offline_target(model)
+        # The offline target never contacts a provider, so its credential is
+        # synthetic. Seeding it here keeps it out of the resolver's
+        # substituted-secret report, which is reserved for genuinely missing
+        # Agent configuration.
+        overlay = {OFFLINE_UPSTREAM_KEY_ENV: OFFLINE_UPSTREAM_KEY_VALUE}
+        return StaticModelTargetProvider(target), "blocked", overlay, target.model
+
+    provider = DeepSeekProvider(model)
+    # Resolving now turns a missing key or a bad model into an error before an
+    # image is built, instead of a 401 inside the container minutes later.
+    resolved = provider.resolve(environ)
+    _require_credential(resolved.credential_env, environ)
+    return provider, "open", {}, resolved.model
+
+
+def _require_credential(name: str, environ: Mapping[str, str]) -> None:
+    if environ.get(name, "").strip():
+        return
+    raise InterceptionConfigurationError(
+        f"A live model run needs {name}. Set it in the environment or .env, or "
+        "drop --model-source to verify against the offline mock."
     )
 
 
@@ -155,25 +218,26 @@ def _trace_output(
 
 
 @dataclass(frozen=True, slots=True)
-class _OfflineDockerBuilder:
-    """Build the isolated runtime while holding only what it needs.
+class _VerifyDockerBuilder:
+    """Build the runtime while holding only what it needs.
 
-    A closure here would keep the whole of ``build_offline_runtime``'s scope alive
+    A closure here would keep the whole of ``build_verify_runtime``'s scope alive
     for as long as the factory does.
     """
 
     secret_resolver: OfflineSecretResolver
-    target: ModelTargetConfig
+    model_provider: ModelTargetProvider
+    egress: EgressMode
     trace_sink: TraceSink
     trace_max_bytes: int
 
     def __call__(self) -> DockerRuntime:
         return DockerRuntime(
             secret_resolver=self.secret_resolver,
-            model_provider=StaticModelTargetProvider(self.target),
+            model_provider=self.model_provider,
             trace_sink=self.trace_sink,
             trace_max_bytes=self.trace_max_bytes,
-            egress="blocked",
+            egress=self.egress,
         )
 
 
@@ -184,3 +248,16 @@ class _CompositeTraceSink:
     def emit(self, event: TraceEvent) -> None:
         for sink in self.sinks:
             sink.emit(event)
+
+
+__all__ = [
+    "DEFAULT_DEEPSEEK_MODEL",
+    "DEEPSEEK_API_KEY_ENV",
+    "MODEL_SOURCES",
+    "OFFLINE_SOURCE",
+    "OFFLINE_TARGET_PLUGIN",
+    "OFFLINE_UPSTREAM_KEY_ENV",
+    "ModelSource",
+    "VerifyRuntime",
+    "build_verify_runtime",
+]

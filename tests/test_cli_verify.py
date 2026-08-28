@@ -7,11 +7,11 @@ import pytest
 
 from agentbench.cli.features.verify import verify
 from agentbench.cli.main import cli
-from agentbench.cli.offline_runtime import (
+from agentbench.cli.verify_runtime import (
     OFFLINE_TARGET_PLUGIN,
     OFFLINE_UPSTREAM_KEY_ENV,
-    OfflineRuntime,
-    build_offline_runtime,
+    VerifyRuntime,
+    build_verify_runtime,
 )
 from agentbench.harness import (
     AgentRegistration,
@@ -53,8 +53,8 @@ def _offline(
     pairs: int = 1,
     runner: object | None = None,
     resolver: OfflineSecretResolver | None = None,
-) -> OfflineRuntime:
-    return OfflineRuntime(
+) -> VerifyRuntime:
+    return VerifyRuntime(
         runner=runner or FakeSuiteRunner(),  # type: ignore[arg-type]
         trace_state=_trace_state(pairs),
         secret_resolver=resolver or OfflineSecretResolver({}),
@@ -146,6 +146,61 @@ def test_cli_dispatches_verify_options(monkeypatch) -> None:
             },
         )
     ]
+
+
+def test_cli_dispatches_a_live_model_source(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        "agentbench.cli.features.verify.verify",
+        lambda agent_id, **kwargs: calls.append(kwargs) or 0,  # type: ignore[func-returns-value]
+    )
+
+    cli(
+        [
+            "verify",
+            "test-agent",
+            "--model-source",
+            "deepseek",
+            "--model",
+            "deepseek-reasoner",
+        ]
+    )
+
+    assert calls[0]["model_source"] == "deepseek"
+    assert calls[0]["model"] == "deepseek-reasoner"
+
+
+def test_cli_omits_the_model_source_when_it_is_the_offline_default(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        "agentbench.cli.features.verify.verify",
+        lambda agent_id, **kwargs: calls.append(kwargs) or 0,  # type: ignore[func-returns-value]
+    )
+
+    cli(["verify", "test-agent"])
+
+    assert "model_source" not in calls[0]
+
+
+def test_a_misconfigured_model_source_is_reported_as_an_error(
+    monkeypatch, repo_root: Path
+) -> None:
+    """A missing provider key is the caller's mistake, not a verdict on the Agent."""
+
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    output: list[str] = []
+
+    exit_code = verify(
+        DOCKER_AGENT_ID,
+        registry_path=_registry_path(repo_root),
+        output_fn=output.append,
+        model_source="deepseek",
+    )
+
+    assert exit_code == 2
+    assert "DEEPSEEK_API_KEY" in output[-1]
 
 
 def test_cli_reads_probe_text_from_a_file(monkeypatch, tmp_path: Path) -> None:
@@ -488,7 +543,7 @@ def test_requested_llm_trace_reaches_output_when_no_live_panel_owns_the_terminal
     written: list[str] = []
     silent_panel = LLMActivity(lambda _: None, live_updates=False)
 
-    build_offline_runtime(
+    build_verify_runtime(
         max_inputs=1,
         probe_text="ping",
         output_fn=written.append,
@@ -502,7 +557,7 @@ def test_requested_llm_trace_reaches_output_when_no_live_panel_owns_the_terminal
 
 
 def _emit_trace_event(written: list[str]) -> None:
-    from agentbench.cli.offline_runtime import _trace_output
+    from agentbench.cli.verify_runtime import _trace_output
 
     silent_panel = LLMActivity(lambda _: None, live_updates=False)
     TerminalTraceSink(_trace_output(silent_panel, written.append)).emit(
@@ -526,7 +581,7 @@ def test_offline_runtime_targets_the_offline_plugin_with_a_synthetic_credential(
     monkeypatch.delenv(OFFLINE_UPSTREAM_KEY_ENV, raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
 
-    offline = build_offline_runtime(
+    offline = build_verify_runtime(
         max_inputs=1,
         probe_text="ping",
         output_fn=lambda _: None,

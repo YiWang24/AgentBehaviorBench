@@ -221,6 +221,70 @@ def test_openrouter_target_rewrites_endpoint_model_and_optional_headers(
     assert b'"model":"openai/gpt-4.1-mini"' in request.content
 
 
+def test_deepseek_is_registered_and_shares_the_openai_compatible_adapter() -> None:
+    """DeepSeek speaks the OpenAI chat format, so it needs no bespoke plugin."""
+
+    from defuzex_model_interceptor.registry import load_targets
+    from defuzex_model_interceptor.targets import DEEPSEEK_TARGET
+
+    assert load_targets()["deepseek"] is DEEPSEEK_TARGET
+
+    request = type(
+        "Request",
+        (),
+        {
+            "scheme": "https",
+            "host": "api.openai.com",
+            "port": 443,
+            "path": "/v1/chat/completions",
+            "content": b'{"model":"gpt-source","messages":[]}',
+            "headers": {"authorization": "Bearer upstream"},
+        },
+    )()
+    route = Route(
+        route_id="chat",
+        host_patterns=("api.openai.com",),
+        ports=(443,),
+        methods=("POST",),
+        path_patterns=("/v1/chat/completions",),
+        protocol_plugin="openai-chat",
+        credential_id="primary",
+    )
+    target = Target(
+        provider_id="deepseek",
+        target_plugin="deepseek",
+        base_url="https://api.deepseek.com/v1",
+        model="deepseek-chat",
+        headers={},
+    )
+
+    prepared = DEEPSEEK_TARGET.prepare_request(request, route=route, target=target)
+
+    assert request.host == "api.deepseek.com"
+    assert request.path == "/v1/chat/completions"
+    assert prepared.target_model == "deepseek-chat"
+    assert b'"model":"deepseek-chat"' in request.content
+
+
+def test_an_unsupported_source_protocol_names_the_provider_that_refused_it() -> None:
+    """DeepSeek exposes no /responses endpoint; the error must not say OpenRouter."""
+
+    from defuzex_model_interceptor.targets import DEEPSEEK_TARGET, TargetRoutingError
+
+    route = Route(
+        route_id="odd",
+        host_patterns=("api.openai.com",),
+        ports=(443,),
+        methods=("POST",),
+        path_patterns=("/v1/embeddings",),
+        protocol_plugin="json-http",
+        credential_id="primary",
+    )
+
+    with pytest.raises(TargetRoutingError, match="deepseek"):
+        DEEPSEEK_TARGET.prepare_request(object(), route=route, target=object())
+
+
 def test_trace_redaction_covers_headers_fields_and_literal_secrets() -> None:
     payload = {
         "authorization": "Bearer provider-secret",

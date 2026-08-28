@@ -151,6 +151,17 @@ defuzex = pytest.importorskip("defuzex", reason="the DefuzeX SDK drives the real
 class TestRealSdkAcceptsTheLocalProviders:
     """These Providers must satisfy the SDK, not just our own expectations."""
 
+    @pytest.fixture(autouse=True)
+    def _isolated_run_lock(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """Give each test its own single-active-Run lock.
+
+        The SDK enforces one active Run per host with an OS file lock resolved from
+        ``XDG_RUNTIME_DIR``. Without redirecting it, these tests fail whenever any
+        other Run — a real `agentbench verify`, or a parallel test — holds it.
+        """
+
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "runtime"))
+
     @staticmethod
     def _run(tmp_path: Path, *, requirement: Path | None, max_inputs: int = 1):
         return defuzex.create_run(

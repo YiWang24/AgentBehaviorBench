@@ -32,6 +32,14 @@ environment. Before running a benchmark, make sure that:
 - The Agent is registered in `resources/registry.toml`, and its directory,
   `agent.toml`, and requirement file exist.
 
+### One Run at a Time
+
+The DefuzeX SDK enforces a single active Run per host with an operating-system
+file lock. A second `run`, `certify`, or `verify` started while another is still
+going fails with `RunAlreadyActiveError`, so batch these commands sequentially
+rather than in parallel. The lock file is resolved from `XDG_RUNTIME_DIR`, which
+is also how a test suite isolates itself from a Run happening on the same machine.
+
 Show root help with:
 
 ```powershell
@@ -47,9 +55,11 @@ Current subcommands:
 | `verify` | Check offline that one Agent starts and its model traffic is captured. Uses no credentials and no network. |
 | `certify` | Verify one `adapting` Agent can complete its requested Cases and promote it to `ready`. |
 
-`verify` is the only command that runs without `DEFUZEX_API_KEY`, without
-`OPENROUTER_API_KEY`, and without network access. Use it while adapting an Agent,
-before `certify`.
+`verify` is the only command that runs without `DEFUZEX_API_KEY`: it supplies its
+own Case and Judge Providers instead of calling the DefuzeX Backend. By default it
+also needs no model credential and no network at all. `--model-source deepseek`
+trades that hermetic property for real model replies, and needs only
+`DEEPSEEK_API_KEY`. Use `verify` while adapting an Agent, before `certify`.
 
 ## 2. Default Command and Compatibility
 
@@ -194,7 +204,18 @@ Judge Provider itself, which selects the SDK's **local Provider mode**. With a
 custom pair the SDK builds no Backend client at all, so no credential is resolved
 and no request leaves the process.
 
-The whole run is hermetic:
+Two things vary and nothing else does. The Case and Judge Providers are always
+local. The model replies come from either the offline mock or a real provider,
+selected with `--model-source`:
+
+| `--model-source` | Model replies | Egress | Credential |
+| --- | --- | --- | --- |
+| `offline` (default) | Synthesized in the interceptor | Blocked (`--internal`) | None |
+| `deepseek` | Real DeepSeek API | Open | `DEEPSEEK_API_KEY` |
+
+`DEFUZEX_API_KEY` is never read in either mode, and the Registry is never written.
+
+Under the default `offline` source the whole run is hermetic:
 
 - no `DEFUZEX_API_KEY` and no `OPENROUTER_API_KEY` are read;
 - the SDK is imported and used, but only its local Provider path runs, so it
@@ -209,7 +230,9 @@ The whole run is hermetic:
 
 ```text
 agentbench verify [-h] [--env-file PATH] [--input TEXT] [--inputs N]
-                  [--keep-artifacts] [--json] [--llm-trace {off,terminal}]
+                  [--keep-artifacts] [--json]
+                  [--model-source {offline,deepseek}] [--model MODEL]
+                  [--llm-trace {off,terminal}]
                   [--llm-trace-max-bytes BYTES] agent_id
 ```
 
@@ -217,6 +240,7 @@ agentbench verify [-h] [--env-file PATH] [--input TEXT] [--inputs N]
 python -m agentbench verify langgraph-customer-support-agent
 python -m agentbench verify swe-agent --inputs 3 --llm-trace terminal
 python -m agentbench verify swe-agent --input "@prompts\probe.txt" --keep-artifacts
+python -m agentbench verify swe-agent --model-source deepseek
 ```
 
 ### 4.3 Arguments
@@ -229,6 +253,8 @@ python -m agentbench verify swe-agent --input "@prompts\probe.txt" --keep-artifa
 | `--inputs N` | No | `1` | Number of probe inputs sent in the single Case. |
 | `--keep-artifacts` | No | Delete | Keep the temporary result log and print its path. |
 | `--json` | No | Human report | Print one JSON summary and nothing else. |
+| `--model-source {offline,deepseek}` | No | `offline` | Where model replies come from. `deepseek` opens egress and needs `DEEPSEEK_API_KEY`. |
+| `--model MODEL` | No | `DEEPSEEK_MODEL` or `deepseek-chat` | Model slug for the selected source. |
 | `--llm-trace {off,terminal}` | No | `off` | Also dump every captured payload. Debugging only. |
 | `--llm-trace-max-bytes BYTES` | No | `262144` | Maximum captured bytes per request or response. |
 | `-h`, `--help` | No | - | Show `verify` help and exit. |
@@ -330,6 +356,8 @@ and the document are the whole contract:
   "cases": {"completed": 1, "requested": 1},
   "sdk_judge_status": "pass",
   "model_calls": {
+    "source": "offline",
+    "model": "offline-verify-model",
     "captured_pairs": 2,
     "calls": [
       {
@@ -358,6 +386,22 @@ returns. `result_log` is populated only with `--keep-artifacts`.
 reported separately from `verdict` because they answer different questions: the
 Judge grades the Run, while `verdict` also requires the model traffic to have been
 observable.
+
+`model_calls.source` and `model_calls.model` record which model actually answered,
+so an archived summary cannot be mistaken for the other mode.
+
+### 4.8 Live Model Notes
+
+`--model-source deepseek` is useful when the offline mock's constant replies are
+what an Agent trips over — a graph that routes on reply content, or a framework
+that rejects a synthesized tool call. It costs real tokens, so it is opt-in.
+
+DeepSeek serves only the OpenAI **chat** wire format. An Agent whose manifest
+routes `openai-responses` or `anthropic-messages` traffic cannot be served by it,
+and features layered on top of chat may still be refused — an Agent requesting
+JSON-schema `response_format` currently gets `400 This response_format type is
+unavailable now`. Those are provider limits, not adapter defects: the offline
+source still verifies such an Agent.
 
 ## 5. `certify`
 

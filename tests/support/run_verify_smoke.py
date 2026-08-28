@@ -21,7 +21,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from agentbench.cli.features.verify import verify  # noqa: E402
-from agentbench.cli.offline_runtime import build_offline_runtime  # noqa: E402
+from agentbench.cli.verify_runtime import build_verify_runtime  # noqa: E402
 
 DEFAULT_AGENT_ID = "langgraph-customer-support-agent"
 PROBE_COUNT = 2
@@ -39,7 +39,7 @@ def main() -> int:
     def emit(line: str) -> None:
         lines.append(line)
 
-    offline = build_offline_runtime(max_inputs=PROBE_COUNT, output_fn=emit)
+    offline = build_verify_runtime(max_inputs=PROBE_COUNT, output_fn=emit)
     # The JSON summary is the contract worth asserting on; the human report is
     # free to change layout without breaking this check.
     exit_code = verify(
