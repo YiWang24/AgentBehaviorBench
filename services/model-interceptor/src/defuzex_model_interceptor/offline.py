@@ -337,7 +337,7 @@ def _prompt_schema(payload: Mapping[str, Any]) -> dict[str, Any] | None:
 
     label = _SCHEMA_LABEL.search(text)
     if label is not None:
-        for start, obj in _json_objects(text[label.end():]):
+        for _, _, obj in _json_objects(text[label.end():]):
             if isinstance(obj.get("properties"), dict) or "$defs" in obj or "$ref" in obj:
                 return obj
 
@@ -391,7 +391,13 @@ def _structured_content(payload: Mapping[str, Any]) -> str | None:
         example = _prompt_example(payload, require_free_turn=False)
         if example is not None:
             return json.dumps(example, ensure_ascii=False)
-    return json.dumps(_arguments_for(schema), ensure_ascii=False)
+        # Nothing stated the shape, but the Agent still asked for JSON, so an
+        # empty object at least parses.
+        return "{}"
+
+    # Any other `response_format` — `{"type": "text"}` above all — asks for no
+    # JSON at all, so the caller falls back to the ordinary text reply.
+    return None
 
 
 # Words an Agent uses for the branch that ends a run. Matched on the value with
@@ -434,14 +440,15 @@ def _terminal_choice(choices: list[Any]) -> Any:
     return choices[0]
 
 
-def _json_objects(text: str) -> list[tuple[int, dict[str, Any]]]:
+def _json_objects(text: str) -> list[tuple[int, int, dict[str, Any]]]:
     """Every balanced `{...}` region in `text` that parses as a JSON object.
 
-    Each entry carries the offset the region started at, so callers can rank
-    examples by where they appear in the prompt.
+    Each entry carries the half-open ``(start, end)`` span the region occupied in
+    `text`, so callers can rank examples by where they appear in the prompt and
+    exclude the source text an object was already recovered from.
     """
 
-    found: list[tuple[int, dict[str, Any]]] = []
+    found: list[tuple[int, int, dict[str, Any]]] = []
     depth = 0
     start = -1
     for index, character in enumerate(text):
@@ -458,7 +465,7 @@ def _json_objects(text: str) -> list[tuple[int, dict[str, Any]]]:
                     pass
                 else:
                     if isinstance(parsed, dict):
-                        found.append((start, parsed))
+                        found.append((start, index + 1, parsed))
                 start = -1
     return found
 
@@ -486,9 +493,9 @@ def _prompt_example(
     text = _prompt_text(payload)
     if "json" not in text.lower():
         return None
-    braced = [(start, obj) for start, obj in _json_objects(text) if len(obj) > 1]
+    braced = [entry for entry in _json_objects(text) if len(entry[2]) > 1]
     if require_free_turn:
-        return braced[-1][1] if braced else None
+        return braced[-1][2] if braced else None
 
     # In `json_object` mode the prompt often carries two kinds of object: work
     # quoted back from an earlier turn, and the contract for *this* reply.
@@ -498,9 +505,10 @@ def _prompt_example(
     #
     #     you must provide your response in the following json format:
     #         "next_agent": "one of planner/selector/reporter"
-    candidates = list(braced)
-    spans = [(start, start + len(json.dumps(obj))) for start, obj in braced]
-    loose = _brace_less_example(text, exclude=spans)
+    candidates = [(start, obj) for start, _, obj in braced]
+    loose = _brace_less_example(
+        text, exclude=[(start, end) for start, end, _ in braced]
+    )
     if loose is not None:
         candidates.append(loose)
     if not candidates:
@@ -611,37 +619,32 @@ def _openai_responses(
     payload: Mapping[str, Any], model: str, token: str
 ) -> dict[str, Any]:
     tool = None if _has_tool_result(payload.get("input")) else _first_tool(payload)
-    structured = _reply_text(payload) if tool is None else None
-    if structured is not None:
-        output: list[dict[str, Any]] = [
-            {
-                "type": "message",
-                "id": f"msg_defuzex_offline_{token}",
-                "role": "assistant",
-                "status": "completed",
-                "content": [{"type": "output_text", "text": structured}],
-            }
-        ]
-    elif tool is not None:
-        name, arguments = tool
-        call_id = f"{_TOOL_CALL_PREFIX}_{token}"
-        output: list[dict[str, Any]] = [
-            {
-                "type": "function_call",
-                "id": call_id,
-                "call_id": call_id,
-                "name": name,
-                "arguments": json.dumps(arguments, ensure_ascii=False),
-            }
-        ]
-    else:
+    output: list[dict[str, Any]]
+    if tool is None:
         output = [
             {
                 "type": "message",
                 "id": f"msg_defuzex_offline_{token}",
                 "role": "assistant",
                 "status": "completed",
-                "content": [{"type": "output_text", "text": OFFLINE_TEXT}],
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": _reply_text(payload) or OFFLINE_TEXT,
+                    }
+                ],
+            }
+        ]
+    else:
+        name, arguments = tool
+        call_id = f"{_TOOL_CALL_PREFIX}_{token}"
+        output = [
+            {
+                "type": "function_call",
+                "id": call_id,
+                "call_id": call_id,
+                "name": name,
+                "arguments": json.dumps(arguments, ensure_ascii=False),
             }
         ]
     return {
