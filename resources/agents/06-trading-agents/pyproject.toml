@@ -1,0 +1,29 @@
+[project]
+name = "trading-agents-benchmark"
+version = "0.1.0"
+description = "AgentBench adapter for TauricResearch/TradingAgents (vendored source, network-mocked)"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = { text = "Apache-2.0" }
+
+dependencies = [
+    "langgraph>=0.4.8,<2",
+    "langgraph-checkpoint-sqlite>=2.0.0,<3",
+    "langchain-core>=0.3.81,<1.1",
+    "langchain-openai>=0.3.23,<0.4",
+    "pandas>=2.3.0,<3",
+    "stockstats>=0.6.5,<1",
+    "yfinance>=1.4.1,<2",
+    "requests>=2.32.4,<3",
+    "python-dateutil>=2.8,<3",
+    "python-dotenv>=1.0.0,<2",
+    "typing-extensions>=4.14.0,<5",
+]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["tradingagents*", "trading_agents_benchmark*"]

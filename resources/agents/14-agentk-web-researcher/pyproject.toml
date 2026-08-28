@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentk-web-researcher-benchmark"
+version = "0.1.0"
+description = "AgentBench adaptation of the mikekelly/AgentK web researcher."
+requires-python = ">=3.11"
+# Upstream also ships a shell tool, a file-writing tool, and agents that spawn
+# one another; none is reached by the selected graph. Selenium is omitted
+# because the page loader is replaced, so the image needs no browser.
+dependencies = [
+    "langgraph>=0.2",
+    "langchain-core>=0.3",
+    "langchain-community>=0.3",
+    "langchain-openai>=0.2",
+    "langchain-anthropic>=0.3",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+py-modules = ["config"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["agents*", "tools*", "agentk_benchmark*", "benchmark_mocks*"]

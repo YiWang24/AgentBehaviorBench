@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deep-research-benchmark"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    # agents.py imports `create_agent` from langchain.agents, which is the
+    # langchain 1.x API, so the 1.x line is pinned rather than the 0.3 line.
+    "langgraph>=1.0,<2",
+    "langgraph-checkpoint-sqlite>=2.0",
+    "langchain>=1.0,<2",
+    "langchain-core>=1.0,<2",
+    "langchain-openai>=1.0,<2",
+    "langchain-community>=0.4,<1",
+    # agents.py imports all three provider classes at module scope. The
+    # OpenAI path is the one that runs (MODEL_PROVIDER=openai); these two
+    # are installed only so the imports resolve.
+    "langchain-google-genai>=2.1",
+    "langchain-ollama>=0.3",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.0",
+    "httpx[http2]>=0.27",
+    "beautifulsoup4>=4.12",
+    "markdown>=3.7",
+    "aiohttp>=3.11",
+    "structlog>=24.0",
+    "python-dotenv>=1.0",
+    # web_utils.py imports `ddgs` at module scope. The method that would call
+    # it (_execute_search) is replaced before any search runs, so no query is
+    # ever sent, but the import must still resolve.
+    "ddgs>=6.0",
+    # web_utils.py also imports AsyncTavilyClient at module scope. The
+    # TavilyProvider.search method is replaced, so no request is sent.
+    "tavily-python>=0.5",
+    # Not installed: streamlit/chainlit (the app is not the entry point).
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

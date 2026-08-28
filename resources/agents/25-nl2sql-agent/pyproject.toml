@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nl2sql-agent-benchmark"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "langgraph>=1.0.5",
+    "langchain>=1.2.0",
+    "langchain-openai>=1.1.3",
+    "langchain-community>=0.4.1",
+    "pydantic>=2.12",
+    "pydantic-settings>=2.12",
+    "jsonschema>=4.0.0",
+    "sqlglot[rs]>=26.0.0",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.2",
+    "structlog>=24.0.0",
+    "typing-extensions>=4.12",
+    "sqlalchemy>=2.0",
+    # data_agent/__init__.py imports the Cosmos adapter eagerly, so azure-cosmos
+    # has to resolve even though no Cosmos client is ever created and no Azure
+    # endpoint is contacted. The egress guard would fail loudly if one were.
+    "azure-cosmos>=4.7.0",
+    # Not installed: databricks-sql-connector, psycopg, pyodbc and
+    # azure-identity (the datasource is a local SQLite file),
+    # langgraph-cli/langgraph-api and chainlit (the server and UI are not the
+    # entry point).
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"data_agent.config" = ["*.yaml"]
+"data_agent.prompts" = ["*.yaml", "*.txt", "*.md"]

@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "langmanus": "./src/src/graph/builder.py:build_graph"
+  },
+  "env": ".env"
+}

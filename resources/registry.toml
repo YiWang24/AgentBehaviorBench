@@ -44,3 +44,286 @@ status = "ready"
 framework = "langgraph"
 source = "https://github.com/SWE-agent/SWE-agent"
 case = 1
+
+[[agents]]
+agent_id = "trading-agents"
+path = "resources/agents/06-trading-agents"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/TauricResearch/TradingAgents"
+case = 1
+
+# Adapted and offline-proven up to the planner node, but `verify` cannot drive
+# it to completion: five call sites require JSON model output that the offline
+# mock does not produce. See the Agent README, "Offline gate limitation".
+# Certification against a real model owns the transition to ready.
+[[agents]]
+agent_id = "gpt-researcher"
+path = "resources/agents/07-gpt-researcher"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/assafelovic/gpt-researcher"
+case = 1
+
+[[agents]]
+agent_id = "deepagents-research"
+path = "resources/agents/08-deepagents-research"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/langchain-ai/deepagents"
+case = 1
+
+[[agents]]
+agent_id = "agent-service-research"
+path = "resources/agents/09-agent-service-research"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/JoshuaC215/agent-service-toolkit"
+case = 1
+
+[[agents]]
+agent_id = "react-agent"
+path = "resources/agents/10-react-agent"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/langchain-ai/react-agent"
+case = 1
+
+[[agents]]
+agent_id = "langtalks-swe-agent"
+path = "resources/agents/11-langtalks-swe-agent"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/langtalks/swe-agent"
+case = 1
+
+[[agents]]
+agent_id = "event-deep-research"
+path = "resources/agents/12-event-deep-research"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/bernatsampera/event-deep-research"
+case = 1
+
+[[agents]]
+agent_id = "clinical-pipeline"
+path = "resources/agents/13-clinical-pipeline"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/bcefghj/medical-multi-agent-system"
+case = 1
+
+[[agents]]
+agent_id = "agentk-web-researcher"
+path = "resources/agents/14-agentk-web-researcher"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/mikekelly/AgentK"
+case = 1
+
+[[agents]]
+agent_id = "deepfund"
+path = "resources/agents/15-deepfund"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/HKUSTDial/DeepFund"
+case = 1
+
+[[agents]]
+agent_id = "open-deepthink-qdad"
+path = "resources/agents/16-open-deepthink-qdad"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/iblameandrew/open-deepthink"
+case = 1
+
+[[agents]]
+agent_id = "adaptive-rag"
+path = "resources/agents/17-adaptive-rag"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/dhruvsinghal09/Adaptive-Rag"
+case = 1
+
+[[agents]]
+agent_id = "langmanus"
+path = "resources/agents/18-langmanus"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/darwin-lau/langmanus"
+case = 1
+
+[[agents]]
+agent_id = "ai-travel-agent"
+path = "resources/agents/19-ai-travel-agent"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/nirbar1985/ai-travel-agent"
+case = 1
+
+[[agents]]
+agent_id = "anima"
+path = "resources/agents/20-anima"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/Fullive-AI/Anima"
+case = 1
+
+[[agents]]
+agent_id = "graph-websearch-agent"
+path = "resources/agents/21-graph-websearch-agent"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/john-adeojo/graph_websearch_agent"
+case = 1
+
+[[agents]]
+agent_id = "career-assistant"
+path = "resources/agents/22-career-assistant"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/amanv1906/GENAI-CareerAssistant-Multiagent"
+case = 1
+
+[[agents]]
+agent_id = "podcast-writer"
+path = "resources/agents/23-podcast-writer"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/artnoage/Podcast"
+case = 1
+
+[[agents]]
+agent_id = "excel-agent"
+path = "resources/agents/24-excel-agent"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/Gen-Future/ExcelMind"
+case = 1
+
+[[agents]]
+agent_id = "nl2sql-agent"
+path = "resources/agents/25-nl2sql-agent"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/eosho/langchain_data_agent"
+case = 1
+
+[[agents]]
+agent_id = "article-explainer"
+path = "resources/agents/26-article-explainer"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/duartecaldascardoso/article-explainer"
+case = 1
+
+[[agents]]
+agent_id = "garmin-coach"
+path = "resources/agents/27-garmin-coach"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/leonzzz435/garmin-ai-coach"
+case = 1
+
+[[agents]]
+agent_id = "kiroku"
+path = "resources/agents/28-kiroku"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/cnunescoelho/kiroku"
+case = 1
+
+[[agents]]
+agent_id = "breadfree-rotation"
+path = "resources/agents/29-breadfree-rotation"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/FeiCoder/BreadFree-Simu"
+case = 1
+
+[[agents]]
+agent_id = "mcp-agent"
+path = "resources/agents/30-mcp-agent"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/braincrew-lab/langgraph-mcp-agents"
+case = 1
+
+[[agents]]
+agent_id = "deep-research"
+path = "resources/agents/31-deep-research"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/tarun7r/deep-research-agent"
+case = 1
+
+[[agents]]
+agent_id = "readwren-interview"
+path = "resources/agents/32-readwren-interview"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/muratcankoylan/readwren"
+case = 1
+
+[[agents]]
+agent_id = "ecommerce-rec"
+path = "resources/agents/33-ecommerce-rec"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/bcefghj/multi-agent-ecommerce-system"
+case = 1
+
+[[agents]]
+agent_id = "mcube-patent-draft"
+path = "resources/agents/34-mcube-patent-draft"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/yycyyv/M-Cube"
+case = 1
+
+[[agents]]
+agent_id = "crypto-hedge-fund"
+path = "resources/agents/35-crypto-hedge-fund"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/51bitquant/ai-hedge-fund-crypto"
+case = 1
+
+[[agents]]
+agent_id = "primo-stock-analyst"
+path = "resources/agents/36-primo-stock-analyst"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/ivebotunac/PrimoAgent"
+case = 1

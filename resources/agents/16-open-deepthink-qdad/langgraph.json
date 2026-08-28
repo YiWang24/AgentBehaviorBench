@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "qdad": "./src/qdad_benchmark/graph.py:graph"
+  },
+  "env": ".env"
+}

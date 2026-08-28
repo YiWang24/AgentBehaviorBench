@@ -1,0 +1,56 @@
+schema_version = "defuzex-bench.agent.v2"
+agent_id = "langtalks-swe-agent"
+display_name = "LangTalks Architect and Developer SWE Agent"
+framework = "langgraph"
+
+[source]
+url = "https://github.com/langtalks/swe-agent"
+revision = "5946af4f57cba03761015837ad5f87ef5c8d99e9"
+license = "MIT"
+
+[build]
+context = "."
+dockerfile = "Dockerfile"
+
+[launch]
+argv = ["python", "-m", "langtalks_swe_benchmark.worker"]
+input_mode = "jsonl"
+output_format = "jsonl"
+workdir = "/opt/agent"
+
+[runtime]
+type = "docker"
+timeout_sec = 600
+env_keys = []
+secret_env_keys = []
+
+[llm_interception]
+required = true
+trust_plugin = "pem-env"
+
+[llm_interception.environment]
+ANTHROPIC_BASE_URL = "https://api.anthropic.com"
+LANGTALKS_SWE_STATE_ROOT = "/tmp/langtalks-swe"
+LANGSMITH_TRACING = "false"
+
+[[llm_interception.credentials]]
+id = "primary"
+agent_env = "ANTHROPIC_API_KEY"
+auth_plugin = "anthropic-api-key"
+
+[[llm_interception.routes]]
+id = "anthropic-messages"
+host_patterns = ["api.anthropic.com"]
+ports = [443]
+methods = ["POST"]
+path_patterns = ["/v1/messages"]
+protocol_plugin = "anthropic-messages"
+credential = "primary"
+
+[adapter]
+type = "langgraph"
+mode = "in_process"
+config = "langgraph.json"
+graph_id = "agent"
+input_key = "implementation_research_scratchpad"
+output_key = "implementation_plan"

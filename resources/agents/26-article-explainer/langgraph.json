@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "explainer_swarm": "./src/explainer_benchmark/graph.py:graph"
+  },
+  "env": ".env"
+}

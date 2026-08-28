@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-agent-benchmark"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "langgraph>=0.3.21",
+    "langchain-core>=0.3",
+    "langchain-openai>=0.3.11",
+    "langchain-mcp-adapters>=0.0.7",
+    "mcp>=1.6.0",
+    "pytz>=2024.1",
+    "python-dotenv>=1.1.0",
+    # Not installed: streamlit and jupyter/notebook (the UI and notebooks are
+    # not the entry point), faiss-cpu and pymupdf (used only by
+    # mcp_server_rag.py, which is not among the configured servers),
+    # langchain-anthropic (the OpenAI path is used).
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

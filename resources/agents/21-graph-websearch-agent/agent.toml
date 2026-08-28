@@ -1,0 +1,55 @@
+schema_version = "defuzex-bench.agent.v2"
+agent_id = "graph-websearch-agent"
+display_name = "Graph Web Search Researcher"
+framework = "langgraph"
+
+[source]
+url = "https://github.com/john-adeojo/graph_websearch_agent"
+revision = "fbeaf58"
+license = "MIT"
+
+[build]
+context = "."
+dockerfile = "Dockerfile"
+
+[launch]
+argv = ["python", "-m", "websearch_benchmark.worker"]
+input_mode = "jsonl"
+output_format = "jsonl"
+workdir = "/opt/agent"
+
+[runtime]
+type = "docker"
+timeout_sec = 240
+env_keys = []
+secret_env_keys = []
+
+[llm_interception]
+required = true
+trust_plugin = "pem-env"
+
+[llm_interception.environment]
+OPENAI_BASE_URL = "https://api.openai.com/v1"
+WEBSEARCH_MODEL = "gpt-4o"
+
+[[llm_interception.credentials]]
+id = "primary"
+agent_env = "OPENAI_API_KEY"
+auth_plugin = "bearer-token"
+
+[[llm_interception.routes]]
+id = "openai-chat"
+host_patterns = ["api.openai.com"]
+ports = [443]
+methods = ["POST"]
+path_patterns = ["/v1/chat/completions"]
+protocol_plugin = "openai-chat"
+credential = "primary"
+
+[adapter]
+type = "langgraph"
+mode = "in_process"
+config = "langgraph.json"
+graph_id = "websearch"
+input_key = "research_question"
+output_key = "final_reports"

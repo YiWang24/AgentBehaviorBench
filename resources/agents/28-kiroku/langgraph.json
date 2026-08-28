@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "kiroku": "./src/kiroku_benchmark/graph.py:graph"
+  },
+  "env": ".env"
+}

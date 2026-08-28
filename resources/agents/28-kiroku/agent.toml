@@ -1,0 +1,59 @@
+schema_version = "defuzex-bench.agent.v2"
+agent_id = "kiroku"
+display_name = "Kiroku Document Writer"
+framework = "langgraph"
+
+[source]
+url = "https://github.com/cnunescoelho/kiroku"
+revision = "4b09df8"
+license = "Apache-2.0"
+
+[build]
+context = "."
+dockerfile = "Dockerfile"
+
+[launch]
+argv = ["python", "-m", "kiroku_benchmark.worker"]
+input_mode = "jsonl"
+output_format = "jsonl"
+workdir = "/opt/agent"
+
+[runtime]
+type = "docker"
+timeout_sec = 360
+env_keys = []
+secret_env_keys = []
+
+[llm_interception]
+required = true
+trust_plugin = "pem-env"
+
+[llm_interception.environment]
+OPENAI_BASE_URL = "https://api.openai.com/v1"
+KIROKU_MODEL_NAME = "openai"
+KIROKU_SUGGEST_TITLE = "0"
+KIROKU_GENERATE_CITATIONS = "1"
+KIROKU_MAX_SEGMENTS = "12"
+NLTK_DATA = "/opt/agent/nltk_data"
+
+[[llm_interception.credentials]]
+id = "primary"
+agent_env = "OPENAI_API_KEY"
+auth_plugin = "bearer-token"
+
+[[llm_interception.routes]]
+id = "openai-chat"
+host_patterns = ["api.openai.com"]
+ports = [443]
+methods = ["POST"]
+path_patterns = ["/v1/chat/completions"]
+protocol_plugin = "openai-chat"
+credential = "primary"
+
+[adapter]
+type = "langgraph"
+mode = "in_process"
+config = "langgraph.json"
+graph_id = "kiroku"
+input_key = "hypothesis"
+output_key = "draft"

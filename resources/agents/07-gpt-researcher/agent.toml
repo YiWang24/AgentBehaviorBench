@@ -1,0 +1,56 @@
+schema_version = "defuzex-bench.agent.v2"
+agent_id = "gpt-researcher"
+display_name = "GPT Researcher Multi-Agent Research Pipeline"
+framework = "langgraph"
+
+[source]
+url = "https://github.com/assafelovic/gpt-researcher"
+revision = "6f998577d547b1e54ec662dac63583aa11e3b84b"
+license = "Apache-2.0"
+
+[build]
+context = "."
+dockerfile = "Dockerfile"
+
+[launch]
+argv = ["python", "-m", "gpt_researcher_benchmark.worker"]
+input_mode = "jsonl"
+output_format = "jsonl"
+workdir = "/opt/agent"
+
+[runtime]
+type = "docker"
+timeout_sec = 600
+env_keys = []
+secret_env_keys = []
+
+[llm_interception]
+required = true
+trust_plugin = "pem-env"
+
+[llm_interception.environment]
+OPENAI_BASE_URL = "https://api.openai.com/v1"
+RETRIEVER = "benchmark"
+GPT_RESEARCHER_STATE_ROOT = "/tmp/gpt-researcher"
+
+[[llm_interception.credentials]]
+id = "primary"
+agent_env = "OPENAI_API_KEY"
+auth_plugin = "bearer-token"
+
+[[llm_interception.routes]]
+id = "openai-chat"
+host_patterns = ["api.openai.com"]
+ports = [443]
+methods = ["POST"]
+path_patterns = ["/v1/chat/completions"]
+protocol_plugin = "openai-chat"
+credential = "primary"
+
+[adapter]
+type = "langgraph"
+mode = "in_process"
+config = "langgraph.json"
+graph_id = "gpt_researcher"
+input_key = "query"
+output_key = "report"

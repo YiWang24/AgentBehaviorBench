@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "clinical": "./src/clinical_benchmark/graph.py:graph"
+  },
+  "env": ".env"
+}

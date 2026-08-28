@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crypto-hedge-benchmark"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    # util_func imports `CompiledGraph` from langgraph.graph.state as a type
+    # hint (in save_graph_as_png, which the benchmark disables). The alias was
+    # dropped after the 0.2 line, so pin there.
+    "langgraph>=0.2.20,<0.3",
+    "langchain>=0.3,<1",
+    "langchain-core>=0.3,<1",
+    "langchain-openai>=0.2,<1",
+    # llm/__init__.py imports ChatGroq and ChatGoogleGenerativeAI at module
+    # scope; the OpenAI path is the one that runs, so these resolve imports only.
+    "langchain-groq>=0.1",
+    "langchain-google-genai>=2.0",
+    "langchain-anthropic>=0.2",
+    "langchain-ollama>=0.2",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.0",
+    "pandas>=2.0",
+    "numpy>=1.26",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+    "requests>=2.31",
+    "dateparser>=1.2",
+    "pycryptodome>=3.22",
+    "aiohttp>=3.11",
+    "colorama>=0.4",
+    "tabulate>=0.9",
+    # requests/aiohttp/pycryptodome/dateparser back the Binance gateway, which
+    # is imported but never called once the data methods are replaced.
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

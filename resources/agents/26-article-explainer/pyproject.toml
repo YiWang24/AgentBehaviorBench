@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "article-explainer-benchmark"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "langgraph>=0.2,<1",
+    "langgraph-swarm>=0.0.9",
+    "langchain>=0.3,<1",
+    "langchain-core>=0.3,<1",
+    "langchain-openai>=0.2,<1",
+    "langchain-community>=0.3,<1",
+    "langchain-text-splitters>=0.3,<1",
+    "python-dotenv>=1.0",
+    # service/config.py imports ChatOllama at module scope, so langchain-ollama
+    # has to resolve even though the local-model branch is never taken: the
+    # benchmark always injects OPENAI_API_KEY. No Ollama endpoint is contacted,
+    # and the egress guard would fail loudly if one were.
+    "langchain-ollama>=0.2",
+    # Not installed: streamlit and streamlit-pdf-viewer (the UI is not the
+    # entry point), pypdf (the PDF loader is not on the graph path), ruff.
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

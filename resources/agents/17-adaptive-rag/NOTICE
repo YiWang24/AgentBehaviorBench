@@ -1,0 +1,11 @@
+Upstream: https://github.com/dhruvsinghal09/Adaptive-Rag  (revision 6f6401e)
+
+The upstream repository declares the MIT License in its README:
+
+    "This project is licensed under the MIT License - see the [LICENSE] file
+     for details."
+
+but ships no LICENSE file, so there is no licence text to reproduce here. The
+declaration is recorded rather than a licence file fabricated on upstream's
+behalf. `agent.toml` records `license = "MIT"` on the strength of that
+statement.

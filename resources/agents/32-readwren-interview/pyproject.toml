@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "readwren-benchmark"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "langgraph>=0.2,<1",
+    "langchain-core>=0.3,<1",
+    "langchain-openai>=0.2,<1",
+    "python-dotenv>=1.0",
+    # interview_agent.py and agents/__init__.py import redis at module scope
+    # for the optional checkpointer. use_redis=False means no client is ever
+    # created; the import still has to resolve.
+    "redis>=5.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

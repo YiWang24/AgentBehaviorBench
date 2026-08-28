@@ -1,0 +1,12 @@
+{
+  "get_current_time": {
+    "command": "python",
+    "args": ["/opt/agent/mcp_servers/mcp_server_time.py"],
+    "transport": "stdio"
+  },
+  "get_weather": {
+    "command": "python",
+    "args": ["/opt/agent/mcp_servers/mcp_server_local.py"],
+    "transport": "stdio"
+  }
+}

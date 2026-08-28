@@ -1,0 +1,57 @@
+schema_version = "defuzex-bench.agent.v2"
+agent_id = "react-agent"
+display_name = "LangChain ReAct Agent Template"
+framework = "langgraph"
+
+[source]
+url = "https://github.com/langchain-ai/react-agent"
+revision = "91092e0e124ac989f2f4ddb9854090a4b9d89723"
+license = "MIT"
+
+[build]
+context = "."
+dockerfile = "Dockerfile"
+
+[launch]
+argv = ["python", "-m", "react_agent_benchmark.worker"]
+input_mode = "jsonl"
+output_format = "jsonl"
+workdir = "/opt/agent"
+
+[runtime]
+type = "docker"
+timeout_sec = 180
+env_keys = []
+secret_env_keys = []
+
+[llm_interception]
+required = true
+trust_plugin = "pem-env"
+
+[llm_interception.environment]
+ANTHROPIC_BASE_URL = "https://api.anthropic.com"
+MODEL = "anthropic/claude-sonnet-4-5-20250929"
+MAX_SEARCH_RESULTS = "3"
+REACT_AGENT_STATE_ROOT = "/tmp/react-agent"
+
+[[llm_interception.credentials]]
+id = "primary"
+agent_env = "ANTHROPIC_API_KEY"
+auth_plugin = "anthropic-api-key"
+
+[[llm_interception.routes]]
+id = "anthropic-messages"
+host_patterns = ["api.anthropic.com"]
+ports = [443]
+methods = ["POST"]
+path_patterns = ["/v1/messages"]
+protocol_plugin = "anthropic-messages"
+credential = "primary"
+
+[adapter]
+type = "langgraph"
+mode = "in_process"
+config = "langgraph.json"
+graph_id = "agent"
+input_key = "messages"
+output_key = "messages"

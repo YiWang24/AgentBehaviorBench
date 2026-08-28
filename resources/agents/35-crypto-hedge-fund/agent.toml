@@ -1,0 +1,57 @@
+schema_version = "defuzex-bench.agent.v2"
+agent_id = "crypto-hedge-fund"
+display_name = "Crypto Hedge Fund"
+framework = "langgraph"
+
+[source]
+url = "https://github.com/51bitquant/ai-hedge-fund-crypto"
+revision = "c6750e0"
+license = "MIT"
+
+[build]
+context = "."
+dockerfile = "Dockerfile"
+
+[launch]
+argv = ["python", "-m", "crypto_benchmark.worker"]
+input_mode = "jsonl"
+output_format = "jsonl"
+workdir = "/opt/agent"
+
+[runtime]
+type = "docker"
+timeout_sec = 300
+env_keys = []
+secret_env_keys = []
+
+[llm_interception]
+required = true
+trust_plugin = "pem-env"
+
+[llm_interception.environment]
+# The model provider and base_url come from config.yaml (model.base_url =
+# https://api.openai.com/v1); the interceptor captures that host.
+CRYPTO_CONFIG = "/opt/agent/config.yaml"
+CRYPTO_WORKSPACE = "/tmp/crypto"
+
+[[llm_interception.credentials]]
+id = "primary"
+agent_env = "OPENAI_API_KEY"
+auth_plugin = "bearer-token"
+
+[[llm_interception.routes]]
+id = "openai-chat"
+host_patterns = ["api.openai.com"]
+ports = [443]
+methods = ["POST"]
+path_patterns = ["/v1/chat/completions"]
+protocol_plugin = "openai-chat"
+credential = "primary"
+
+[adapter]
+type = "langgraph"
+mode = "in_process"
+config = "langgraph.json"
+graph_id = "crypto_hedge"
+input_key = "messages"
+output_key = "messages"

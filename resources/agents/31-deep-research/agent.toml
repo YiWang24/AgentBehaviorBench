@@ -1,0 +1,72 @@
+schema_version = "defuzex-bench.agent.v2"
+agent_id = "deep-research"
+display_name = "Deep Research Agent"
+framework = "langgraph"
+
+[source]
+url = "https://github.com/tarun7r/deep-research-agent"
+revision = "a974b4c"
+license = "MIT"
+
+[build]
+context = "."
+dockerfile = "Dockerfile"
+
+[launch]
+argv = ["python", "-m", "dr_benchmark.worker"]
+input_mode = "jsonl"
+output_format = "jsonl"
+workdir = "/opt/agent"
+
+[runtime]
+type = "docker"
+timeout_sec = 300
+env_keys = []
+secret_env_keys = []
+
+[llm_interception]
+required = true
+trust_plugin = "pem-env"
+
+[llm_interception.environment]
+MODEL_PROVIDER = "openai"
+MODEL_NAME = "gpt-4o"
+# The synthesizer role reads SUMMARIZATION_MODEL, whose default is a Gemini
+# name; on the OpenAI path that would be sent to OpenAI verbatim, so it is
+# pinned to an OpenAI model too.
+SUMMARIZATION_MODEL = "gpt-4o"
+# agents.py appends "/v1" itself, so the base URL is bare.
+OPENAI_BASE_URL = "https://api.openai.com"
+SEARCH_PROVIDER = "duckduckgo"
+DR_RECURSION_LIMIT = "40"
+
+[[llm_interception.credentials]]
+id = "primary"
+agent_env = "OPENAI_API_KEY"
+auth_plugin = "bearer-token"
+
+[[llm_interception.routes]]
+id = "openai-chat"
+host_patterns = ["api.openai.com"]
+ports = [443]
+methods = ["POST"]
+path_patterns = ["/v1/chat/completions"]
+protocol_plugin = "openai-chat"
+credential = "primary"
+
+[[llm_interception.routes]]
+id = "openai-responses"
+host_patterns = ["api.openai.com"]
+ports = [443]
+methods = ["POST"]
+path_patterns = ["/v1/responses"]
+protocol_plugin = "openai-responses"
+credential = "primary"
+
+[adapter]
+type = "langgraph"
+mode = "in_process"
+config = "langgraph.json"
+graph_id = "deep_research"
+input_key = "research_topic"
+output_key = "final_report"

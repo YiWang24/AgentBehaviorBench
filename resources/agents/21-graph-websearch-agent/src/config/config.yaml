@@ -1,0 +1,8 @@
+# Deliberately empty.
+#
+# utils.helper_functions.load_config() copies every key in this file into the
+# process environment, substituting a placeholder string when the value is
+# blank. A blank OPENAI_API_KEY here would therefore overwrite the credential
+# the Model Interceptor injects, and every model call would fail with a bogus
+# key. Leaving the mapping empty means the loop has nothing to overwrite.
+{}

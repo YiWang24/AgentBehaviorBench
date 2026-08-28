@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "career-assistant-benchmark"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "langgraph>=0.2,<1",
+    # tools.py imports langchain.pydantic_v1, a shim removed in langchain 1.x.
+    "langchain>=0.3,<1",
+    "langchain-core>=0.3,<1",
+    "langchain-community>=0.3,<1",
+    "langchain-openai>=0.2,<1",
+    "python-dotenv>=1.0",
+    # Not installed: linkedin-api, firecrawl-py, pymupdf, pypdf and python-docx
+    # (the modules that use them are replaced), streamlit and its plugins (the
+    # UI is not the entry point), langchain-groq (the OpenAI path is used).
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+# Upstream is a flat set of top-level modules, not a package, so they are
+# declared individually alongside the two benchmark packages.
+py-modules = ["agents", "members", "prompts", "schemas", "tools", "chains"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["benchmark_mocks*", "career_benchmark*"]

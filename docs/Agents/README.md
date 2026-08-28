@@ -9,6 +9,7 @@ Use these pages instead of reading the full reference by default.
 | [Runtime](./Runtime.md) | Docker, package data, JSONL worker, Model Interceptor, or filesystem behavior is involved. |
 | [Certification](./Certify.md) | You need to understand `certify`, `ready`, Judge failures, or result artifacts. |
 | [Troubleshooting](./Troubleshooting.md) | You have a concrete error message. |
+| [Rejected](./Rejected.md) | You want to know whether a candidate was already reviewed and turned down. |
 | [Reference](./Reference.md) | You need the original complete onboarding reference. |
 
 Preferred flow:

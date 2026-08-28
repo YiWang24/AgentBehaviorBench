@@ -1,0 +1,57 @@
+schema_version = "defuzex-bench.agent.v2"
+agent_id = "anima"
+display_name = "Anima Home Agent"
+framework = "langgraph"
+
+[source]
+url = "https://github.com/Fullive-AI/Anima"
+revision = "ea1542f"
+license = "Apache-2.0"
+
+[build]
+context = "."
+dockerfile = "Dockerfile"
+
+[launch]
+argv = ["python", "-m", "anima_benchmark.worker"]
+input_mode = "jsonl"
+output_format = "jsonl"
+workdir = "/opt/agent"
+
+[runtime]
+type = "docker"
+timeout_sec = 240
+env_keys = []
+secret_env_keys = []
+
+[llm_interception]
+required = true
+trust_plugin = "pem-env"
+
+[llm_interception.environment]
+ANIMA_LLM_MODEL = "gpt-4o"
+ANIMA_LLM_BASE_URL = "https://api.openai.com/v1"
+ANIMA_DATA_DIR = "/tmp/anima/data"
+ANIMA_SKILLS_DIR = "/opt/agent/skills"
+
+[[llm_interception.credentials]]
+id = "primary"
+agent_env = "ANIMA_LLM_API_KEY"
+auth_plugin = "bearer-token"
+
+[[llm_interception.routes]]
+id = "openai-chat"
+host_patterns = ["api.openai.com"]
+ports = [443]
+methods = ["POST"]
+path_patterns = ["/v1/chat/completions"]
+protocol_plugin = "openai-chat"
+credential = "primary"
+
+[adapter]
+type = "langgraph"
+mode = "in_process"
+config = "langgraph.json"
+graph_id = "anima_chat"
+input_key = "message"
+output_key = "result"

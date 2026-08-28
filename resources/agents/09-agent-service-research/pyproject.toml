@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-service-research-benchmark"
+version = "0.1.0"
+description = "AgentBench adaptation of the JoshuaC215/agent-service-toolkit research assistant."
+requires-python = ">=3.12"
+# Upstream declares 42 dependencies covering a FastAPI service, a Streamlit UI,
+# four checkpointer backends, and a dozen model providers. The selected graph
+# reaches the set below. langchain-chroma is included because agents/tools.py
+# imports it at module level for a retrieval tool the research assistant does
+# not bind; that module is vendored unchanged rather than edited.
+dependencies = [
+    "langgraph~=1.2.7",
+    "langchain~=1.3.11",
+    "langchain-core>=1.4.8,<2",
+    "langchain-community~=0.4.2",
+    "langchain-openai~=1.3.3",
+    # core/llm.py imports every provider SDK at module level, so all six are
+    # required to import the selected graph even though only OpenAI is used.
+    "langchain-anthropic~=1.4.8",
+    "langchain-aws~=1.6.1",
+    "langchain-google-genai~=4.2.6",
+    "langchain-google-vertexai>=3.2.4",
+    "langchain-groq~=1.1.3",
+    "langchain-ollama~=1.1.0",
+    "langchain-chroma~=1.1.0",
+    "ddgs>=9.14.4",
+    "duckduckgo-search>=8.1.1",
+    "numexpr~=2.14.1",
+    "pyowm~=3.5.0",
+    "pydantic~=2.13.4",
+    "pydantic-settings~=2.14.2",
+    "python-dotenv~=1.2.2",
+    "httpx~=0.28.1",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["agents*", "core*", "schema*", "research_assistant_benchmark*", "benchmark_mocks*"]

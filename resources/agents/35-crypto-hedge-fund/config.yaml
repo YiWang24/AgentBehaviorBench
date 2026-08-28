@@ -1,0 +1,17 @@
+# Benchmark configuration. Values the settings singleton reads at import time.
+mode: backtest
+start_date: 2025-08-30
+end_date: 2025-09-04
+primary_interval: 1h
+initial_cash: 100000
+margin_requirement: 0.0
+show_reasoning: false
+show_agent_graph: false
+signals:
+  intervals: ["1h", "4h"]
+  tickers: ["BTCUSDT", "ETHUSDT"]
+  strategies: ["MacdStrategy"]
+model:
+  name: "gpt-4o"
+  provider: "openai"
+  base_url: "https://api.openai.com/v1"

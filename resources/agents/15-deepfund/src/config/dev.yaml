@@ -1,0 +1,24 @@
+# Deep Fund Configuration
+exp_name: "dev"
+
+# Trading settings
+cashflow: 100000
+tickers:
+  - TSLA
+  - NVDA
+
+
+# Analysts to run, refer to graph.constants.py
+workflow_analysts:
+  - fundamental
+  - macroeconomic
+  - technical
+  - company_news
+  - insider
+  - policy
+
+# LLM model settings, refer to llm/inference.py: LLMConfig
+llm:
+  provider: "DeepSeek" 
+  model: "deepseek-chat" # DeepSeek-V3
+

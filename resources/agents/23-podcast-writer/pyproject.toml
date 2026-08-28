@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "podcast-writer-benchmark"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "langgraph>=0.2,<1",
+    "langchain-core>=0.3,<1",
+    "langchain-openai>=0.2,<1",
+    "python-dotenv>=1.0",
+    # The upstream requirements pin a full application stack — FastAPI, gdown,
+    # datasets, graphviz, TTS. The three graph nodes need none of it.
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# load_prompt() resolves prompts/<name>.txt relative to the site-packages root,
+# so the text files ship inside a `prompts` package that lands exactly there.
+[tool.setuptools.package-data]
+prompts = ["*.txt"]

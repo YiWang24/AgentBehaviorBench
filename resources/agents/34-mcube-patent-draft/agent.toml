@@ -1,0 +1,59 @@
+schema_version = "defuzex-bench.agent.v2"
+agent_id = "mcube-patent-draft"
+display_name = "M-Cube Patent Drafter"
+framework = "langgraph"
+
+[source]
+url = "https://github.com/yycyyv/M-Cube"
+revision = "75ab640"
+license = "MIT"
+
+[build]
+context = "."
+dockerfile = "Dockerfile"
+
+[launch]
+argv = ["python", "-m", "mcube_benchmark.worker"]
+input_mode = "jsonl"
+output_format = "jsonl"
+workdir = "/opt/agent"
+
+[runtime]
+type = "docker"
+timeout_sec = 420
+env_keys = []
+secret_env_keys = []
+
+[llm_interception]
+required = true
+trust_plugin = "pem-env"
+
+[llm_interception.environment]
+# build_llm_callable routes the "openai" provider through an OpenAI-compatible
+# endpoint via a raw httpx client. The Model Interceptor captures it by host.
+MCUBE_PROVIDER = "openai"
+MCUBE_MODEL = "gpt-4o"
+MCUBE_VISION_MODEL = "gpt-4o"
+MCUBE_BASE_URL = "https://api.openai.com/v1"
+
+[[llm_interception.credentials]]
+id = "primary"
+agent_env = "MCUBE_API_KEY"
+auth_plugin = "bearer-token"
+
+[[llm_interception.routes]]
+id = "openai-chat"
+host_patterns = ["api.openai.com"]
+ports = [443]
+methods = ["POST"]
+path_patterns = ["/v1/chat/completions"]
+protocol_plugin = "openai-chat"
+credential = "primary"
+
+[adapter]
+type = "langgraph"
+mode = "in_process"
+config = "langgraph.json"
+graph_id = "mcube_draft"
+input_key = "disclosure_text"
+output_key = "specification"

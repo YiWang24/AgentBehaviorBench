@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gpt-researcher-benchmark"
+version = "0.1.0"
+description = "AgentBench adaptation of the assafelovic/gpt-researcher multi-agent research pipeline."
+requires-python = ">=3.11"
+# Upstream declares ~173 dependencies covering every retriever, scraper,
+# embedding provider, and export format. The selected graph reaches only the
+# set below; provider-specific integrations are imported lazily and the
+# benchmark never selects them. pdf/docx export is disabled, so the native
+# rendering stack (md2pdf, weasyprint, htmldocx) is omitted.
+dependencies = [
+    "langgraph>=1.0,<2",
+    "langchain-core>=1.0,<2",
+    "langchain-openai>=1.0,<2",
+    "langchain-community>=0.3",
+    "langchain-classic>=1.0",
+    "langchain-text-splitters>=0.3",
+    "beautifulsoup4>=4.12",
+    "click>=8.1",
+    "tiktoken>=0.7",
+    "json-repair>=0.30",
+    "json5>=0.9",
+    "colorama>=0.4",
+    "loguru>=0.7",
+    "markdown>=3.6",
+    "mistune>=3.0",
+    "aiofiles>=23.0",
+    "python-dotenv>=1.0,<2",
+    "pydantic>=2.7",
+    "typing-extensions>=4.14",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["gpt_researcher*", "multi_agents*", "gpt_researcher_benchmark*", "benchmark_mocks*"]
