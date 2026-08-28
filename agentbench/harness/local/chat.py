@@ -22,10 +22,10 @@ from defuzex.errors import ProviderError
 
 from agentbench.runtime.interception import (
     DEEPSEEK_API_KEY_ENV,
-    DEEPSEEK_BASE_URL_ENV,
-    DEEPSEEK_MODEL_ENV,
     DEFAULT_DEEPSEEK_BASE_URL,
     DEFAULT_DEEPSEEK_MODEL,
+    DeepSeekProvider,
+    InterceptionConfigurationError,
 )
 
 DEFAULT_TIMEOUT = 180.0
@@ -61,22 +61,25 @@ class ChatModel:
     def from_environment(
         cls, environ: Mapping[str, str], *, model: str | None = None
     ) -> "ChatModel":
+        """Resolve the same DeepSeek target the Agent's own traffic would reach.
+
+        The endpoint is resolved through ``DeepSeekProvider`` rather than re-read
+        here, so the host-side Providers and the intercepted Agent cannot end up
+        pointing at different models or base URLs, and both get the same
+        whitespace and HTTPS validation.
+        """
+
         api_key = environ.get(DEEPSEEK_API_KEY_ENV, "").strip()
         if not api_key:
             raise LocalProviderError(
                 f"Local Case generation and judging need {DEEPSEEK_API_KEY_ENV}. "
                 "Set it in the environment or .env."
             )
-        return cls(
-            api_key=api_key,
-            model=(
-                model or environ.get(DEEPSEEK_MODEL_ENV, "") or DEFAULT_DEEPSEEK_MODEL
-            ).strip(),
-            base_url=(
-                environ.get(DEEPSEEK_BASE_URL_ENV, "").strip()
-                or DEFAULT_DEEPSEEK_BASE_URL
-            ).rstrip("/"),
-        )
+        try:
+            target = DeepSeekProvider(model).resolve(environ)
+        except InterceptionConfigurationError as exc:
+            raise LocalProviderError(str(exc)) from exc
+        return cls(api_key=api_key, model=target.model, base_url=target.base_url)
 
     def json_object(
         self,
