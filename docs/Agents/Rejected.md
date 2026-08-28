@@ -461,3 +461,196 @@ Reconsider when: the repository grows an agent with backend capability of its
   own, or AgentBench gains a reviewed way to supply a client-side tool set as
   part of a Case.
 ```
+
+<!-- bulk catalog triage: entries below require capability the offline single-container gate does not provide -->
+
+## Requires a vector or graph database server
+
+```text
+Agent rejected: requires a vector or graph database server
+Requirement: R2
+Reason code: UNSUPPORTED_EXECUTION_MODE
+Reason: The agent's retrieval/state backbone is a client-server database (Milvus, Qdrant, Weaviate, Neo4j, pgvector, Elasticsearch/OpenSearch, ClickHouse, Cassandra). The offline single-container runtime provides no such server and blocks egress, so the agent cannot start; substituting the datastore wholesale would replace the retrieval behaviour under test rather than adapt it. (An *embedded* store such as FAISS is fine and was used for gpt-researcher and adaptive-rag — these need a separate server process.)
+Evidence (repository @ reviewed revision — the named service is a required, server-backed dependency):
+  - 1517005260/graph-rag-agent @ 4296b7c — neo4j graph database
+  - rcortx/kiwiq @ e1dc648 — weaviate
+  - esxr/langgraph-mcp @ 1694424 — milvus
+  - NVIDIA-AI-IOT/remembr @ 964faab — milvus
+  - yolo-hyl/medical-rag @ 4ec5871 — milvus
+  - Yanyutin753/LambChat @ 49d04b0 — milvus
+  - NVIDIA-AI-Blueprints/ai-virtual-assistant @ c4a7f87 — milvus + pgvector
+  - HezaoHezao/poirot @ 86bf279 — milvus + neo4j + pgvector
+  - chatchat-space/LangGraph-Chatchat @ 0ae53b7 — milvus + clickhouse + elasticsearch + pgvector
+  - skygazer42/GustoBot @ e91b74d — milvus + neo4j + pgvector
+  - ljxpython/ai-agent-platform @ 53d87ab — milvus + neo4j + qdrant + pgvector + opensearch
+  - vibesurf-ai/VibeSurf @ cd6e519 — milvus + clickhouse + elasticsearch + opensearch
+  - kmeanskaran/stock-agent-ops @ 4f283bf — qdrant
+  - mfmezger/conversational-agent-langchain @ b58c9b6 — qdrant
+  - growgraph/ontocast @ e44005d — qdrant
+  - BjornMelin/docmind-ai-llm @ d32fb3c — qdrant
+  - didilili/shopkeeper-agent @ 8045fa4 — qdrant + elasticsearch
+  - FareedKhan-dev/scalable-rag-pipeline @ 3b115e4 — qdrant + neo4j
+  - wassim249/fastapi-langgraph-agent-production-ready-template @ 36c7e2b — pgvector
+  - FareedKhan-dev/production-grade-agentic-system @ 20def05 — pgvector
+  - goruck/home-generative-agent @ 1ae38a6 — pgvector
+  - quarqlabs/argus @ b56a9bc — pgvector
+  - skygazer42/Weaver @ 745693a — pgvector
+  - colossus-lab/openarg_backend @ ec29bd6 — pgvector
+  - bcefghj/agent-knowledge-hub @ bce7b13 — neo4j + pgvector
+  - brainqub3/jar3d_meta_expert @ 3403118 — neo4j
+  - Arvo-AI/aurora @ f1a14ec — cassandra + clickhouse + elasticsearch + neo4j + opensearch + weaviate
+  - Azure-Samples/chat-with-your-data-solution-accelerator @ 0fce713 — opensearch + pgvector
+  - Awarexone/Agentic-Bug-Hunter @ 0826b13 — elasticsearch + opensearch
+  - SecurityClaw/SecurityClaw @ dbccec5 — elasticsearch + opensearch
+  - kevin333353/jobsmith @ f5427c1 — elasticsearch
+  - twanew/OmniWriter @ 2d0aedc — elasticsearch
+  - Eldergenix/Plato-Scientific-Research-Autonomous-Agent @ b0a1fdc — opensearch
+Reconsider when: the offline runtime gains the missing capability, or the agent adds a mode that runs without it.
+```
+
+## Requires a real web browser
+
+```text
+Agent rejected: requires a real web browser
+Requirement: R2
+Reason code: UNSUPPORTED_EXECUTION_MODE
+Reason: The agent drives a real browser (Playwright, Selenium, or browser-use) as a core capability. The benchmark image contains no browser and no display, and the pages it would visit are unreachable with egress blocked.
+Evidence (repository @ reviewed revision — the browser driver is imported and used on the agent path):
+  - zi-yue-1129/DATAGEN @ 8f969d1 — selenium
+  - ginlix-ai/LangAlpha @ 8e54cda — playwright
+  - SalesforceAIResearch/enterprise-deep-research @ 59f8f2a — playwright
+  - hrithikkoduri/WebRover @ c8fadb9 — playwright
+  - SponsioLabs/Sponsio @ 5b69e17 — playwright
+  - CronusL-1141/AI-company @ f782a2b — playwright
+  - tyxben/AI_novel @ 3332ae3 — playwright
+  - billy-enrizky/openbrowser-ai @ 168d43e — browser-use + playwright + selenium
+  - kargarisaac/telegram_link_summarizer_agent @ 4d60395 — playwright
+  - xiongQvQ/AI_Find_Customer @ 9b2fde8 — playwright
+  - itshyao/proxyless-llm-websearch @ 67a9160 — playwright
+  - Ganador1/FenixAI_tradingBot @ bd7373d — playwright
+  - jaguarliuu/xunlong @ f1f9364 — playwright
+Reconsider when: the offline runtime gains the missing capability, or the agent adds a mode that runs without it.
+```
+
+## Requires a MongoDB server
+
+```text
+Agent rejected: requires a mongodb server
+Requirement: R2
+Reason code: UNSUPPORTED_EXECUTION_MODE
+Reason: The agent persists state or data to MongoDB (pymongo). No MongoDB server runs in the offline runtime.
+Evidence (repository @ reviewed revision — pymongo/MongoDB is a required dependency):
+  - lc2panda/alphastream @ abc3398 — MongoDB
+  - vinay-gatech/stocks-insights-ai-agent @ 375efb4 — MongoDB
+  - YUHAO-corn/manufacturing-agents @ 407bc6a — MongoDB
+Reconsider when: the offline runtime gains the missing capability, or the agent adds a mode that runs without it.
+```
+
+## Requires a Docker daemon
+
+```text
+Agent rejected: requires a docker daemon
+Requirement: R2
+Reason code: UNSUPPORTED_EXECUTION_MODE
+Reason: The agent builds or runs containers as part of its operation, which needs a mounted Docker socket or a privileged container — a host-control privilege the runtime does not grant. Both also require a vector-database server.
+Evidence (repository @ reviewed revision — docker plus a vector store are required):
+  - NVIDIA-AI-Blueprints/aiq @ b8c1293 — Docker daemon + qdrant + opensearch
+  - NVIDIA-AI-Blueprints/biomedical-aiq-research-agent @ b5cd7b4 — Docker daemon + milvus
+Reconsider when: the offline runtime gains the missing capability, or the agent adds a mode that runs without it.
+```
+
+## Uses a native non-OpenAI model protocol
+
+```text
+Agent rejected: uses a native non-openai model protocol
+Requirement: R1
+Reason code: UNSUPPORTED_MODEL_PROTOCOL
+Reason: The agent's model client speaks a wire protocol or auth scheme the Model Interceptor cannot capture — Google Gemini/Vertex (generativelanguage/aiplatform), Alibaba DashScope (ChatTongyi), or an image-generation/frontend-coupled path. The interceptor supports the OpenAI chat/responses and Anthropic messages protocols only.
+Evidence (repository @ reviewed revision — the native client is the only model path):
+  - GoogleCloudPlatform/cymbal-air-toolbox-demo @ 7a40521 — ChatVertexAI + a separate Toolbox DB-proxy server
+  - lhh737/LangChain-ReAct-Agent @ 5923949 — ChatTongyi (DashScope native protocol)
+  - lgesuellip/langgraph-whatsapp-agent @ 69b9bdd — ChatGoogleGenerativeAI + Twilio webhook channel
+  - CopilotKit/scene-creator-copilot @ 27fdb84 — Gemini image models via a CopilotKit frontend
+  - neopen/story-shot-agent @ 87664e7 — DashScope + sentence-transformers
+Reconsider when: the offline runtime gains the missing capability, or the agent adds a mode that runs without it.
+```
+
+## No loadable graph entry point
+
+```text
+Agent rejected: no loadable graph entry point
+Requirement: R3
+Reason code: INVALID_ENTRYPOINT
+Reason: No stable file.py:attribute resolves to a compiled LangGraph graph or a zero-argument factory that returns one, so the adapter has nothing to load, or the graph carries no behaviour to test.
+Evidence (repository @ reviewed revision — checked for StateGraph construction and a graph factory outside tests):
+  - EvoScientist/EvoScientist @ 9907534 — no StateGraph or graph factory outside tests
+  - langchain-ai/langgraph-fullstack-python @ 64c7af2 — the graph is create_react_agent with an empty tool list and a one-line prompt — a near-duplicate of the already-added react-agent with no behaviour to test
+Reconsider when: the offline runtime gains the missing capability, or the agent adds a mode that runs without it.
+```
+
+## Requires model weights or heavy binary toolchains
+
+```text
+Agent rejected: requires model weights or heavy binary toolchains
+Requirement: R6
+Reason code: DEPENDENCY_CONFLICT
+Reason: The agent depends on locally-loaded model weights (torch/transformers/sentence-transformers, often GPU-bound) or a multi-gigabyte binary toolchain (a CAD kernel, a TeX distribution) that cannot install and run within the agent image on CPU in the offline runtime.
+Evidence (repository @ reviewed revision — the heavy dependency is required on the agent path):
+  - tablegpt/tablegpt-agent @ 26bc576 — a fine-tuned TableGPT model (torch/transformers weights)
+  - Y-Research-SBU/PosterGen @ 8a54325 — transformers layout models
+  - NVlabs/SpatialClaw @ b062f82 — vision/robotics stack (torch)
+  - NVIDIA-AI-Blueprints/vulnerability-analysis @ 1cf15d6 — NVIDIA NIM models (torch/transformers)
+  - argonne-lcf/ChemGraph @ d1dcdcb — chemistry compute + torch
+  - Pan-Chera/Multi-Agent-CAD @ f31a2f6 — build123d (~400 MB OCP wheels) + aider-chat
+  - 123-qw-as/Beacon @ 36b0b7d — a TeX distribution (xelatex, ~2 GB) + a litellm embeddings endpoint
+  - wassim249/YT-Navigator @ 61e3ddf — torch + YouTube scraping
+  - jamwithai/observable-job-agent @ 5839e4f — torch embeddings + subprocess
+Reconsider when: the offline runtime gains the missing capability, or the agent adds a mode that runs without it.
+```
+
+## Executes external tools or needs a code sandbox
+
+```text
+Agent rejected: executes external tools or needs a code sandbox
+Requirement: R2
+Reason code: UNSUPPORTED_EXECUTION_MODE
+Reason: The agent's core behaviour is running external programs — editing a repository in a sandbox, running security scanners or penetration-testing tools, or reverse-engineering binaries. That requires a writable working tree, host tools, and often network access the read-only, egress-blocked runtime does not provide; several also take a repository rather than text as input.
+Evidence (repository @ reviewed revision — subprocess/os.system drives external tools as the agent's purpose):
+  - langchain-ai/open-swe @ 3da1a1b — a code sandbox to clone and edit repositories
+  - ai-christianson/RA.Aid @ e71bb83 — aider + shell execution against a working repo
+  - kulkarnirohit123/cra-agent @ 4d819a5 — runs security scanners (bandit) as subprocesses against a scanned codebase; input is a repo, not text
+  - jarrycyx/openlens-ai @ 01accec — executes generated code via subprocess
+  - fzn0x/watchtower @ e0cc241 — executes penetration-testing tools
+  - akamai/patchdiff-ai @ ab3d624 — binary reverse-engineering (Ghidra) + the MSRC API
+Reconsider when: the offline runtime gains the missing capability, or the agent adds a mode that runs without it.
+```
+
+## Requires MCP servers over the network or a proprietary SaaS
+
+```text
+Agent rejected: requires mcp servers over the network or a proprietary saas
+Requirement: R2
+Reason code: UNSUPPORTED_EXECUTION_MODE
+Reason: The agent's tools are supplied by MCP servers reached over SSE/HTTP (a separate long-running process the runtime does not host), or by a proprietary hosted service. Unlike mcp-agent, whose stdio servers spawn as in-container subprocesses, these need an external server or account.
+Evidence (repository @ reviewed revision — mcp.client.sse / a hosted service supplies the tools):
+  - Chen-zexi/open-ptc-agent @ 425b957 — MCP servers over SSE + subprocess
+  - isoftstone-data-intelligence-ai/efflux-backend @ c25742b — a database plus MCP servers configured over SSE
+  - NicholasGoh/fastapi-mcp-langgraph-template @ 2bd004a — an MCP server over SSE (mcp.client.sse) + Supabase
+  - tavily-ai/meeting-prep-agent @ 1601434 — a Google-Calendar MCP server + Tavily + the proprietary igptai SaaS client
+Reconsider when: the offline runtime gains the missing capability, or the agent adds a mode that runs without it.
+```
+
+## Trading agents requiring live market data and a database
+
+```text
+Agent rejected: trading agents requiring live market data and a database
+Requirement: R6
+Reason code: DEPENDENCY_CONFLICT
+Reason: Each needs a live market-data or brokerage API (akshare, Alpaca, Steam/Reddit, a crypto exchange) and a database for portfolio state. They are adaptable in principle — the equity/crypto trading behaviour is already represented by trading-agents, deepfund, breadfree-rotation, crypto-hedge-fund and primo-stock-analyst — but each is a full data-and-DB mock for a domain already covered, so they are deferred rather than adapted.
+Evidence (repository @ reviewed revision — a market-data/brokerage API plus a database are required):
+  - simonlin1212/TradingAgents-astock @ ed778c5 — A-share market data (akshare) + a database
+  - huygiatrng/AlpacaTradingAgent @ 8d9d770 — the Alpaca brokerage API + market data
+  - EthanXiang777/circuit-framework @ 7ab0137 — crypto market data + a database
+  - IatomicreactorI/CSGOTrading @ d3f67c1 — Steam Market + Reddit + a database (a DeepFund derivative)
+Reconsider when: the offline runtime gains the missing capability, or the agent adds a mode that runs without it.
+```
