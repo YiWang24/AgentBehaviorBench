@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """最简版：一个函数跑一条 case，从上往下顺序执行，没有任何命令行参数。
 
-跑法（容器内，因为 tradingagents 只装在镜像里，KUMA 也要求 SDK 和 agent 同容器）：
+跑法就一句，在宿主机上：
 
-    python /opt/bench/kuma_bench_simple.py
+    python kuma_bench_simple.py
+
+agent 和 KUMA SDK 都只装在镜像里（SDK 本来也要求和 agent 同容器），所以脚本
+发现自己不在容器里时，会自动把镜像建好、再把自己丢进容器跑。不用手敲 docker。
 
 每条 case 做的事情完全一样，也只有三件：
     1. 写死一份输入数据
@@ -15,23 +18,143 @@
 
 import json
 import os
+import subprocess
+import sys
 import time
 from pathlib import Path
-
-from kuma import create_run
-from langchain_core.callbacks import BaseCallbackHandler
 
 # ---------------------------------------------------------------- 配置
 
 USE_OFFICIAL_JUDGE = False   # True = 用线上 Judge（要 KUMA_API_KEY，消耗配额）
-OUT = Path("/out")           # 结果写到这里
-REPO = Path("/out/repo")     # KUMA 把 .kuma/ 写在这里，放在挂载盘里才能留下来
+
+IN_CONTAINER = Path("/.dockerenv").exists()
+BENCH_DIR = Path(__file__).resolve().parent          # 本文件所在目录
+AGENT_DIR = BENCH_DIR.parent                         # 06-trading-agents/
+OUT = Path("/out") if IN_CONTAINER else AGENT_DIR / "results-simple"
+REPO = OUT / "repo"          # KUMA 把 .kuma/ 写在这里，放挂载盘里才留得下来
 
 # case_id 必须短。后端对 "<case_id>::<input_id>" 有 64 字符上限，超了会被拒，
 # 而且报的是 invalid_case_file，看不出是长度问题。这里最长的也才 25 字符。
 CASE_ID = "ta-simple"
 
+BASE_IMAGE = "ta-simple-base:latest"    # 上游 Dockerfile 原样构建，不改一行
+IMAGE = "ta-simple:latest"              # 上面那层 + KUMA SDK
+
+# ------------------------------------------------ 宿主机：自动建镜像 + 进容器
+# 这一段只在宿主机上执行；进了容器就直接跳过，下面全是正题。
+
+
+def find_env_file():
+    """找 .env。worktree 里没有，得回主检出去拿。"""
+    candidates = [AGENT_DIR.parents[2] / ".env"]        # <repo>/.env
+    common = subprocess.run(["git", "rev-parse", "--path-format=absolute",
+                             "--git-common-dir"],
+                            cwd=str(BENCH_DIR), capture_output=True, text=True)
+    if common.returncode == 0 and common.stdout.strip():
+        candidates.append(Path(common.stdout.strip()).parent / ".env")
+    candidates.append(Path.home() / "projects/DefuzeX/AgentBehaviorBench/.env")
+    for path in candidates:
+        if path.is_file():
+            return path
+    return None
+
+
+def build_images():
+    """镜像不在就建。基础层直接用 TradingAgents 自带的 Dockerfile。"""
+    source = AGENT_DIR / "TradingAgents"
+    if not (source / "Dockerfile").is_file():
+        sys.exit(f"找不到 agent 源码：{source}")
+
+    if subprocess.run(["docker", "image", "inspect", BASE_IMAGE],
+                      capture_output=True).returncode != 0:
+        print(f"构建 {BASE_IMAGE}（上游 Dockerfile，未改动）...")
+        subprocess.run(["docker", "build", "-t", BASE_IMAGE, str(source)], check=True)
+
+    if subprocess.run(["docker", "image", "inspect", IMAGE],
+                      capture_output=True).returncode != 0:
+        sdk = Path(os.environ.get("KUMA_SDK_PATH",
+                                  Path.home() / "projects/DefuzeX/KUMA-DefuzeX")).expanduser()
+        if not (sdk / "pyproject.toml").is_file():
+            sys.exit(f"找不到 KUMA SDK：{sdk}（可用 KUMA_SDK_PATH 指定）")
+        print(f"构建 {IMAGE}（{BASE_IMAGE} + KUMA SDK）...")
+        import shutil
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = Path(tmp)
+            shutil.copytree(sdk / "src", ctx / "kuma-src" / "src")
+            for name in ("pyproject.toml", "README.md", "LICENSE"):
+                if (sdk / name).exists():
+                    shutil.copy2(sdk / name, ctx / "kuma-src" / name)
+            (ctx / "Dockerfile").write_text(
+                f"FROM {BASE_IMAGE}\n"
+                "USER root\n"
+                "COPY kuma-src /opt/kuma-src\n"
+                "RUN pip install --no-cache-dir /opt/kuma-src\n"
+                "RUN mkdir -p /out && chown appuser:appuser /out\n"
+                "USER appuser\n"
+                "ENTRYPOINT []\n"
+            )
+            subprocess.run(["docker", "build", "-t", IMAGE, str(ctx)], check=True)
+
+
+def run_in_docker():
+    """把自己放进容器跑，输出直接透传到当前终端。"""
+    build_images()
+    out = OUT.resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    out.chmod(0o777)
+
+    command = [
+        "docker", "run", "--rm", "--init",
+        "--mount", f"type=bind,source={BENCH_DIR},target=/opt/bench,readonly",
+        "--mount", f"type=bind,source={out},target=/out",
+        # upstream 默认写 ~/.tradingagents，重定向到容器内的可写位置
+        "--env", "TRADINGAGENTS_CACHE_DIR=/tmp/ta/cache",
+        "--env", "TRADINGAGENTS_RESULTS_DIR=/tmp/ta/results",
+        "--env", "TRADINGAGENTS_MEMORY_LOG_PATH=/tmp/ta/memory.md",
+    ]
+    env_file = find_env_file()
+    if env_file:
+        print(f"环境变量来自 {env_file}")
+        command += ["--env-file", str(env_file)]
+    else:
+        print("没找到 .env，只用当前环境变量")
+    for key in ("DEEPSEEK_API_KEY", "OPENROUTER_API_KEY", "KUMA_API_KEY",
+                "TRADINGAGENTS_LLM_PROVIDER", "TRADINGAGENTS_QUICK_THINK_LLM",
+                "TRADINGAGENTS_DEEP_THINK_LLM"):
+        if os.environ.get(key):
+            command += ["--env", f"{key}={os.environ[key]}"]
+
+    # 没指定模型就用 DeepSeek：默认配置指向 openai/gpt-5.5，而仓库 .env 里只有
+    # DeepSeek 的 key，不给默认值会在第一次 LLM 调用时才失败。
+    known = dict(os.environ)
+    if env_file:
+        for line in env_file.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                known.setdefault(k.strip(), v.strip())
+    if not known.get("TRADINGAGENTS_LLM_PROVIDER") and known.get("DEEPSEEK_API_KEY"):
+        command += ["--env", "TRADINGAGENTS_LLM_PROVIDER=deepseek",
+                    "--env", "TRADINGAGENTS_QUICK_THINK_LLM=deepseek-chat",
+                    "--env", "TRADINGAGENTS_DEEP_THINK_LLM=deepseek-chat"]
+    # SDK 读 KUMA_API_KEY，而仓库 .env 里存的是同一把 dfx_ 键但叫 DEFUZEX_API_KEY
+    if USE_OFFICIAL_JUDGE and not known.get("KUMA_API_KEY") and known.get("DEFUZEX_API_KEY"):
+        command += ["--env", f"KUMA_API_KEY={known['DEFUZEX_API_KEY']}"]
+    command += ["--entrypoint", "python", IMAGE, "/opt/bench/kuma_bench_simple.py"]
+
+    print(f"结果目录 {out}\n")
+    sys.exit(subprocess.run(command).returncode)
+
+
+if not IN_CONTAINER:
+    run_in_docker()
+
 # ---------------------------------------------------------------- 跑 agent
+# 从这里往下都在容器里执行。
+
+from kuma import create_run                                    # noqa: E402
+from langchain_core.callbacks import BaseCallbackHandler       # noqa: E402
 
 
 class Recorder(BaseCallbackHandler):
