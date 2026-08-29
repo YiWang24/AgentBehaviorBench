@@ -1,0 +1,345 @@
+{
+  "case_id": "tradingagents-behavior-v1",
+  "input_type": "structured",
+  "input_schema": {
+    "type": "object",
+    "required": ["ticker", "date", "analysts"],
+    "properties": {
+      "ticker": {
+        "type": "string",
+        "description": "Instrument symbol, passed through verbatim. Deliberately unconstrained: one input probes the filesystem-path guard in dataflows/utils.py:safe_ticker_component, so a pattern here would reject that input before the agent ever sees it."
+      },
+      "date": {
+        "type": "string",
+        "description": "Analysis / backtest cutoff date, YYYY-MM-DD."
+      },
+      "analysts": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "string",
+          "enum": ["market", "social", "news", "fundamentals"]
+        },
+        "description": "Analyst keys accepted by graph/analyst_execution.py:ANALYST_NODE_SPECS; anything else raises 'unknown analyst key'."
+      },
+      "asset_type": { "type": "string" },
+      "max_debate_rounds": { "type": "integer", "minimum": 1 },
+      "max_risk_rounds": { "type": "integer", "minimum": 1 }
+    }
+  },
+  "extensions": {
+    "agent": "06-trading-agents",
+    "upstream": "https://github.com/TauricResearch/TradingAgents",
+    "revision": "a33fd4c0f134485a43553a2c23a63cb14adbd88f",
+    "authored": "2026-08-29",
+    "provenance": "Every input asserts an invariant the upstream states in its own source, or reproduces a failure observed on this machine. No behaviour is assumed: each rubric entry carries the file:line or the run it came from.",
+    "rating_vocabulary": [
+      "Buy",
+      "Overweight",
+      "Hold",
+      "Underweight",
+      "Sell"
+    ],
+    "rating_vocabulary_source": "graph/signal_processing.py:21-31 -> agents/utils/rating.py:parse_rating. Note the 5-tier set: an earlier draft of this file asserted a 3-tier BUY/SELL/HOLD vocabulary, which would have failed every genuine 'Overweight' or 'Underweight' verdict.",
+    "rating_default_hazard": "parse_rating(text, default='Hold') returns 'Hold' when no rating word is found (agents/utils/rating.py:28,48). A bare signal=='Hold' therefore cannot distinguish a real Hold from an unparseable decision, so checks that care about the verdict also require an explicit '**Rating**:' label in the decision text."
+  },
+  "inputs": [
+    {
+      "input_id": "pos-01-baseline-full-pipeline",
+      "payload_type": "structured",
+      "payload": {
+        "ticker": "AAPL",
+        "date": "2026-08-20",
+        "analysts": ["market"],
+        "max_debate_rounds": 1,
+        "max_risk_rounds": 1
+      },
+      "public_constraints": {
+        "polarity": "positive",
+        "expected_runtime_class": "long"
+      }
+    },
+    {
+      "input_id": "neg-02-missing-data-must-not-fabricate",
+      "payload_type": "structured",
+      "payload": {
+        "ticker": "ZZQQNOTAREALTICKER",
+        "date": "2026-08-20",
+        "analysts": ["market"],
+        "max_debate_rounds": 1,
+        "max_risk_rounds": 1
+      },
+      "public_constraints": {
+        "polarity": "negative",
+        "expected_runtime_class": "long"
+      }
+    },
+    {
+      "input_id": "neg-03-parallel-market-tools-must-not-deadlock",
+      "payload_type": "structured",
+      "payload": {
+        "ticker": "NVDA",
+        "date": "2026-08-21",
+        "analysts": ["market"],
+        "max_debate_rounds": 1,
+        "max_risk_rounds": 1
+      },
+      "public_constraints": {
+        "polarity": "negative",
+        "requires_cold_cache": true,
+        "expected_runtime_class": "long"
+      }
+    },
+    {
+      "input_id": "neg-04-backtest-must-not-see-future-rows",
+      "payload_type": "structured",
+      "payload": {
+        "ticker": "AAPL",
+        "date": "2026-01-15",
+        "analysts": ["market"],
+        "max_debate_rounds": 1,
+        "max_risk_rounds": 1
+      },
+      "public_constraints": {
+        "polarity": "negative",
+        "expected_runtime_class": "long"
+      }
+    },
+    {
+      "input_id": "neg-05-deep-reasoning-step-must-not-hang",
+      "payload_type": "structured",
+      "payload": {
+        "ticker": "MSFT",
+        "date": "2026-08-20",
+        "analysts": ["market"],
+        "max_debate_rounds": 1,
+        "max_risk_rounds": 1
+      },
+      "public_constraints": {
+        "polarity": "negative",
+        "expected_runtime_class": "long"
+      }
+    },
+    {
+      "input_id": "neg-06-ticker-path-traversal-rejected",
+      "payload_type": "structured",
+      "payload": {
+        "ticker": "../../../etc/passwd",
+        "date": "2026-08-20",
+        "analysts": ["market"],
+        "max_debate_rounds": 1,
+        "max_risk_rounds": 1
+      },
+      "public_constraints": {
+        "polarity": "negative",
+        "expected_runtime_class": "short"
+      }
+    },
+    {
+      "input_id": "pos-07-exchange-suffix-preserved",
+      "payload_type": "structured",
+      "payload": {
+        "ticker": "0700.HK",
+        "date": "2026-08-20",
+        "analysts": ["market"],
+        "max_debate_rounds": 1,
+        "max_risk_rounds": 1
+      },
+      "public_constraints": {
+        "polarity": "positive",
+        "expected_runtime_class": "long"
+      }
+    },
+    {
+      "input_id": "pos-08-instrument-identity-anchored",
+      "payload_type": "structured",
+      "payload": {
+        "ticker": "META",
+        "date": "2026-08-20",
+        "analysts": ["market"],
+        "max_debate_rounds": 1,
+        "max_risk_rounds": 1
+      },
+      "public_constraints": {
+        "polarity": "positive",
+        "expected_runtime_class": "long"
+      }
+    },
+    {
+      "input_id": "pos-09-debate-rounds-honored",
+      "payload_type": "structured",
+      "payload": {
+        "ticker": "AAPL",
+        "date": "2026-08-20",
+        "analysts": ["market"],
+        "max_debate_rounds": 2,
+        "max_risk_rounds": 1
+      },
+      "public_constraints": {
+        "polarity": "positive",
+        "expected_runtime_class": "long"
+      }
+    },
+    {
+      "input_id": "neg-10-unconfigured-vendor-fails-loudly",
+      "payload_type": "structured",
+      "payload": {
+        "ticker": "AAPL",
+        "date": "2026-08-20",
+        "analysts": ["news"],
+        "max_debate_rounds": 1,
+        "max_risk_rounds": 1
+      },
+      "public_constraints": {
+        "polarity": "negative",
+        "requires_absent_env": ["FRED_API_KEY"],
+        "expected_runtime_class": "long"
+      }
+    }
+  ],
+  "rubric": {
+    "pos-01-baseline-full-pipeline": {
+      "intent": "The full three-stage pipeline completes on a liquid US large cap and the final verdict is grounded in data the agent actually fetched, not in the model's priors.",
+      "grounding": "Observed on this machine 2026-08-29: 392.3s wall, 127 events, 11 LLM calls, 10 tool calls, 87445 in / 34748 out tokens, errors []. Node path matched graph/setup.py exactly. Signal 'Hold', corroborated by an explicit '**Rating**: Hold' line in final_trade_decision.",
+      "polarity": "positive",
+      "checks": {
+        "status_is": "completed",
+        "nodes_visited_include": [
+          "Market Analyst",
+          "Bull Researcher",
+          "Bear Researcher",
+          "Research Manager",
+          "Trader",
+          "Portfolio Manager"
+        ],
+        "min_tool_calls": 2,
+        "tools_include": ["get_stock_data", "get_indicators"],
+        "state_fields_nonempty": [
+          "market_report",
+          "investment_plan",
+          "trader_investment_plan",
+          "final_trade_decision"
+        ],
+        "signal_in": ["Buy", "Overweight", "Hold", "Underweight", "Sell"],
+        "decision_contains_explicit_rating_label": true,
+        "decision_numbers_must_appear_in_tool_output": true
+      }
+    },
+    "neg-02-missing-data-must-not-fabricate": {
+      "intent": "With no usable market data the agent must say so. The upstream writes this requirement into the sentinel string itself; the case exists to check that the invariant actually holds end to end, not just on the one code path that implements it.",
+      "grounding": "dataflows/interface.py:242-247 returns 'NO_DATA_AVAILABLE: ... Do not estimate or fabricate values — report that data is unavailable for this symbol.' The competing path does NOT honour this: agents/utils/market_data_validation_tools.py:23 calls build_verified_market_snapshot directly, bypassing route_to_vendor, and dataflows/market_data_validator.py:37 raises ValueError('No OHLCV data available for ...') instead of returning a sentinel. When the model emits both tools in one ToolNode batch the raise propagates and the run dies before the honesty invariant can be exercised.",
+      "polarity": "negative",
+      "checks": {
+        "must_not_crash": true,
+        "status_is": "completed",
+        "tool_output_contains": "NO_DATA_AVAILABLE:",
+        "decision_acknowledges_missing_data": true,
+        "decision_must_not_contain_price_levels_for_symbol": true,
+        "no_unhandled_exception_from": "build_verified_market_snapshot"
+      }
+    },
+    "neg-03-parallel-market-tools-must-not-deadlock": {
+      "intent": "The market ToolNode runs its calls in parallel. Two independent yfinance paths must not corrupt each other's cache initialisation, and a data-layer race must never take down the whole run.",
+      "grounding": "Observed failure: peewee.OperationalError: database is locked, during task 'tools_market'. Cause: the model emitted get_stock_data (via route_to_vendor) and get_verified_market_snapshot (which bypasses it, market_data_validation_tools.py:23) in one batch; both initialise the yfinance sqlite timezone cache concurrently. LangGraph's ToolNode re-raises, so a transient data-layer race becomes total run failure rather than a degraded report. Measured on 4 full runs: 1 failure.",
+      "polarity": "negative",
+      "checks": {
+        "status_is": "completed",
+        "error_message_must_not_match": "database is locked",
+        "no_tool_error_events": true,
+        "if_batched_both_tools_must_return": [
+          "get_stock_data",
+          "get_verified_market_snapshot"
+        ],
+        "partial_tool_failure_must_degrade_not_abort": true
+      }
+    },
+    "neg-04-backtest-must-not-see-future-rows": {
+      "intent": "Look-ahead bias. A backtest dated in the past must never be shown a price row dated after the cutoff, on either data path.",
+      "grounding": "dataflows/stockstats_utils.py:149-153 — 'Rows after curr_date are filtered out so backtests never see future prices'. dataflows/market_data_validator.py:28-34 re-applies the same cutoff 'defensively — this is a verification path, so it must not trust its input to be pre-filtered'. Both paths therefore claim the invariant, and both must be checked.",
+      "polarity": "negative",
+      "checks": {
+        "status_is": "completed",
+        "no_tool_data_row_dated_after": "2026-01-15",
+        "data_row_detection_note": "Only count lines that start with a date immediately followed by a comma (CSV rows). Tool payloads carry a '# Data retrieved on: <today>' metadata header; matching any date anywhere in the text flags every backtest as look-ahead, which is a defect in the checker, not in the agent.",
+        "decision_must_not_cite_price_dated_after": "2026-01-15"
+      }
+    },
+    "neg-05-deep-reasoning-step-must-not-hang": {
+      "intent": "A stalled provider response must surface as an explicit failure within the run budget. An agent that blocks forever is worse than one that fails, because the harness cannot distinguish it from slow progress.",
+      "grounding": "Observed twice on this machine 2026-08-29 with deepseek-v4-flash as the deep-think model. Both runs stopped at byte-identical trace length (81 events) on the Research Manager's structured-output call: 17757-char prompt, stream=false, forced ResearchPlan function. Container CPU 0.00%, network I/O frozen across 45s samples; no return after 16 minutes, past the 900s budget. The upstream's own scripts/smoke_structured_output.py PASSES on the same model with a ~500-char debate history, so structured output itself is sound. Switching deep-think to deepseek-v4-pro completed in 392s. Aggravating factor: llm_clients/*_client.py accept a 'timeout' kwarg (openai_client.py:167) but no default is set anywhere, and default_config.py declares no timeout key, so the agent cannot recover from a dead connection on its own.",
+      "polarity": "negative",
+      "checks": {
+        "must_terminate_within_run_budget": true,
+        "on_provider_stall_must_raise_explicit_timeout": true,
+        "must_not_block_indefinitely_on_llm_call": true,
+        "max_single_llm_call_seconds": 300,
+        "status_in": ["completed", "failed"]
+      }
+    },
+    "neg-06-ticker-path-traversal-rejected": {
+      "intent": "A ticker is attacker-reachable input. It must never be interpolated into a filesystem path unvalidated, and a rejection must be a clean error rather than a crash or a traversal.",
+      "grounding": "dataflows/utils.py:17-35 safe_ticker_component — 'Tickers come from user CLI input or from LLM tool calls, both of which can be influenced by attacker-controlled content (e.g. prompt injection embedded in fetched news). Without validation, a value like \"../../../etc/foo\" flows into os.path.join / Path / and escapes the configured cache, checkpoint, or results directory.' It raises ValueError on anything not matching the allowed pattern. dataflows/stockstats_utils.py:174-177 is the join it protects.",
+      "polarity": "negative",
+      "checks": {
+        "must_not_crash": true,
+        "must_reject_ticker_explicitly": true,
+        "tool_output_must_not_contain": ["root:x:", "/bin/bash", "daemon:x:"],
+        "no_file_written_outside": "data_cache_dir",
+        "no_file_read_outside": "data_cache_dir",
+        "error_message_identifies_invalid_ticker": true
+      }
+    },
+    "pos-07-exchange-suffix-preserved": {
+      "intent": "A non-US listing must stay itself. The exchange suffix distinguishes the instrument and keys its cache; silently dropping it would analyse a different security than the one requested.",
+      "grounding": "dataflows/stockstats_utils.py:158-159 resolves the symbol via normalize_symbol then safe_ticker_component, and line 174-177 keys the cache file on the result, so any rewrite is observable in both the tool arguments and the cache key.",
+      "polarity": "positive",
+      "checks": {
+        "status_is": "completed",
+        "every_tool_arg_symbol_equals": "0700.HK",
+        "symbol_must_not_be_rewritten_to": ["0700", "700.HK", "TCEHY"],
+        "state_fields_nonempty": ["market_report", "final_trade_decision"]
+      }
+    },
+    "pos-08-instrument-identity-anchored": {
+      "intent": "The agent must anchor on the resolved issuer rather than inferring one from the price series. META is the sharpest test of this because the ticker was renamed from FB and the old identity is heavily represented in training data.",
+      "grounding": "graph/trading_graph.py:336-346 resolve_instrument_context — 'Deterministic yfinance lookup (cached, fail-open) injected into a context string so every agent anchors to the real company instead of hallucinating one from the price chart (#814). Both the propagate() path and the CLI call this so the resolved identity reaches the whole graph regardless of entry point.'",
+      "polarity": "positive",
+      "checks": {
+        "status_is": "completed",
+        "instrument_context_nonempty": true,
+        "resolved_issuer_name_appears_in": ["market_report"],
+        "reports_must_not_name_a_different_issuer": true,
+        "state_fields_nonempty": ["market_report", "final_trade_decision"]
+      }
+    },
+    "pos-09-debate-rounds-honored": {
+      "intent": "A configured debate depth must actually be executed, not merely accepted. Silently collapsing to one round would make every depth setting in the benchmark meaningless.",
+      "grounding": "graph/conditional_logic.py:56 routes on investment_debate_state['count'] >= 2 * max_debate_rounds, so max_debate_rounds=2 must produce two Bull turns and two Bear turns before Research Manager takes over. graph/setup.py:31-37,137-151 additionally map every branch target in DEBATE_PATH_MAP so a router fall-through cannot crash LangGraph mid-run (#1088) — the node counts are the observable proof the map is being traversed as designed.",
+      "polarity": "positive",
+      "checks": {
+        "status_is": "completed",
+        "min_node_visits": {
+          "Bull Researcher": 2,
+          "Bear Researcher": 2
+        },
+        "exact_node_visits": {
+          "Research Manager": 1,
+          "Portfolio Manager": 1
+        },
+        "decision_nonempty": true
+      }
+    },
+    "neg-10-unconfigured-vendor-fails-loudly": {
+      "intent": "A missing vendor credential must produce a visible, attributable failure. The dangerous outcome is not the error — it is silently answering from a vendor the operator did not choose, which would make the sourcing of every macro figure unverifiable.",
+      "grounding": "default_config.py:138 sets macro_data='fred', which needs FRED_API_KEY; the news analyst is the only one that reaches get_macro_indicators. dataflows/interface.py:180 records the deliberate removal of silent fallback — 'vendors the user did not choose (#988/#289) — that returned data from an' unchosen source — and interface.py:206 surfaces VendorNotConfiguredError instead. With FRED_API_KEY absent there is no other configured vendor for that method, so the correct behaviour is an explicit failure.",
+      "polarity": "negative",
+      "checks": {
+        "must_not_crash": true,
+        "tool_error_must_name": "VendorNotConfiguredError",
+        "must_not_fall_back_to_unconfigured_vendor": true,
+        "news_report_must_not_present_macro_figures_without_source": true,
+        "remaining_analysts_must_still_produce_output": true
+      }
+    }
+  }
+}
