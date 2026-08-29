@@ -316,6 +316,45 @@ KUMA 的单容器单 Run 锁决定了并行度模型 —— 外层调度器为�
 
 ---
 
+## 九之前：实测结果（2026-08-28，Docker 29.7.2）
+
+原生镜像 `docker build -t ta-native:a33fd4c .`（**Dockerfile 未做任何修改**）一次通过，559 MB。
+
+| 验证项 | 结果 |
+|---|---|
+| `--help` | 正常，确认只有 `--checkpoint` / `--clear-checkpoints` 两个 flag |
+| 原生入口无 TTY 启动 | **停在 "Step 1: Ticker Symbol"，报 `Input is not a terminal (fd=0)` 后 Aborted** —— 静态分析结论得到实证 |
+| 容器内数据层 | yfinance 直连可用，取到真实 AAPL OHLCV（14 条记录），**全程无需任何付费 key** |
+| 端到端运行（编程入口） | **跑通**。1 个分析师、127–149 秒、11 次 LLM 调用、65,859 token（53,826 in / 12,033 out）、10 次工具调用 |
+| 产出质量 | `market_report` 10,181 字符、`final_trade_decision` 2,554 字符，含真实的 50SMA/MACD/布林带数值与执行触发条件 |
+| callback 注入点 | **验证通过**：`on_tool_start/end` 给出工具名、完整入参、原始返回体；`on_llm_end` 给出 `usage_metadata`。第九节未知项 1、3 到此排除 |
+| `past_context` | 冷容器为空，符合预期；compose 挂载 `/home/appuser/.tradingagents` 后会跨 case 累积（第三节的记忆污染风险成立） |
+
+外推：1 个分析师 11 次调用 / 128 秒 → 4 个分析师约 20 次调用 / 4–6 分钟。
+
+### 实测发现的稳定性缺陷：并发 yfinance 缓存锁
+
+4 次完整运行挂了 1 次（挂的是构建后第一次跑）：
+
+```
+peewee.OperationalError: database is locked
+During task with name 'tools_market'
+```
+
+成因：LLM 在**同一个 ToolNode 批次**里同时发出 `get_stock_data` 和 `get_verified_market_snapshot`，LangGraph 并行执行，两条**互相独立的 yfinance 路径**并发初始化 sqlite 时区缓存（`yfinance/cache.py:148 initialise` → `db.connect()`）。`get_verified_market_snapshot` 赢了竞态（返回 1975 字符），`get_stock_data` 失败，随后 `ToolNode._handle_tool_error` 把异常重新抛出，**整个 run 终止**。
+
+这正好落在第二节指出的架构裂缝上：`get_verified_market_snapshot` 绕过 `route_to_vendor`，所以它与 vendor 路由的调用之间**不共享任何串行化**。
+
+隔离复现结果（说明是时序敏感竞态，非必现）：
+
+- 8 路并行 `get_indicators`，冷启动 ×3 → 3/3 全过
+- `get_stock_data` ∥ `get_verified_market_snapshot`，冷启动 ×5 → 5/5 全过
+- 真实图负载下 ×4 → 1 次失败
+
+**对基准的影响**：约 25% 的运行会因此产生伪失败，且失败表现为 run 整体崩溃而非降级。接入前需要处理 —— 候选做法是在容器启动时单线程预热一次 yfinance 缓存，或在 `load_ohlcv` / `route_to_vendor` 外面加一把进程内锁。两者都不需要改上游源码。
+
+---
+
 ## 九、需要先验证的未知项
 
 以下是本次静态分析没能确认、建议实跑一次小规模 case 验证的：
