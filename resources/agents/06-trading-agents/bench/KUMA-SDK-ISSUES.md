@@ -460,3 +460,75 @@ completed 还是 failed，全都不参与判定。**
 ### 本节消耗
 
 官方模板 1 次 + 隔离实验 2 次。累计 credits 99,984 → 99,969。
+
+---
+
+## 八、自造 Case 直测 Judge —— 这一节推翻了第六、七节的主要结论
+
+Case 形状照抄 SDK 仓库自带示例，requirement 直接用官方
+`examples/single_agent_template/requirement.md` 未加改动。六个变体全部走
+自定义 Case + 官方 Judge。
+
+| 变体 | Case 来源 / 验收标准 | 判定 | Judge 判对了吗 |
+|---|---|---|---|
+| `cc-minimal` | `examples/minimal_local.py::local_case` 原样结构，标准宽松（"return a bounded maintenance result"） | `pass` | ✅ 合理 |
+| `cc-swe` | 后端 casegen 返回过的六步 SWE 流程，要求"报告哪些测试失败" | `insufficient_evidence` | ✅ 诚实——这确实需要正文 |
+| `cc-path-ok` | 标准可由文件路径判定，但我写成了"仓库根目录" | `issue` | ✅ 精确指出观察到的是 `tmp/…/report-1.md` |
+| `cc-path-bad` | 同上标准，故意写错文件名 | `issue` | ✅ 列出实际路径，并**额外**报出名单外文件 |
+| `cc-path-fixed` | 标准按容器相对路径改写，文件写对 | `pass` | ✅ 3/3 |
+| `cc-claim-failed` | 标准要求 claim 为 `completed`，提交全部 `status="failed"` | `issue` | ✅ 引用 component_id 与 submission_id |
+
+### 结论：官方 Judge 是好的
+
+`cc-path-fixed` / `cc-path-bad` / `cc-path-ok` 构成三向对照——同一类标准，
+行为正确则 `pass`，文件名写错则 `issue`，标准表述与证据约定不符也能被精确指出。
+**只要验收标准能用 SDK 真正送出的证据表达，官方 Judge 就做出正确、具体、
+可追溯到 component_id 的端到端验证。** 它在缺证据时诚实报 `insufficient_evidence`，
+不猜。
+
+### 前面几节错在哪
+
+- **第六节说"官方 Case 路径永远 pass、是空判"——不成立。** `official-refuse` /
+  `official-failed` 之所以通过，是因为后端生成的那些 SWE 标准恰好能被可观测证据
+  满足（文件确实变了），而破坏只发生在**正文**里，那正是不可见的通道。
+  不是盖章，是"能看见的部分确实一致"。
+- **第七节说"判定只取决于 `logs=` 传没传"——是过度归纳。** 那个单变量对照本身没错，
+  但它成立的前提是那批 case 的标准都需要正文；证据信封里连一个
+  `artifact_snapshot` 都没有时后端置 `runtime_evidence: False` 拒判，
+  有了就退回到"能看见的部分"判。换一组标准（本节）结论完全不同。
+- **`official-failed` 全 `failed` 却 pass，也不是 Judge 忽略状态。**
+  `cc-claim-failed` 证明：只要 case 标准提到 claim，Judge 会准确抓出
+  `blocked` 并判 issue。前者通过只是因为后端那份 case 的标准没提 claim。
+
+我先猜是"文件改动"，被 `official-nofiles` 证伪；再猜是 `logs=`，
+被本节证伪。两次都是我把一组特定 case 的行为当成了通用规则。
+
+### 剩下的、唯一成立的核心缺陷
+
+**SDK 从不送出 response 正文与日志内容。** 因此凡是关于"agent 说了什么"的
+验收标准都结构性不可验证。能用文件路径、文件操作、claim 状态表达的标准
+全部工作正常。
+
+这决定了 KUMA 的适用边界：**它通过文件系统效果和 claim 状态来评判 agent，
+而不是通过 agent 的输出文本。** 对代码修复类 agent 这是贴切的；对
+06-trading-agents 这种产出文本决策的 agent，就是工具不匹配——
+即使让它把决策写进文件，也只能验证"文件被创建了"，无法验证"决策是 BUY"。
+
+第二节那个 `MappingProxyType` 阻断缺陷、第五节的契约陷阱、
+第六节的 `upload_diff` 名不副实，均不受本节影响，依然成立。
+
+### 附带发现
+
+`case_id` 在后端与内容绑定：同一 `case_id` 换内容会抛
+`CaseIntegrityError: The Case integrity metadata does not match`，
+但**要到 judge 阶段才报**，此时整个 Run 已经跑完、算力已经花掉。
+
+`api.py:218`：自定义 Case + 自定义 Judge 强制要求 case 带 `rubric`
+（`Custom Case + custom Judge requires a fixed public rubric`）。
+
+`api.py:233`：`tracking_root = Path("/") if runtime.mode == "docker" else resolved_repo`
+——docker 模式下证据路径是**容器相对**而非仓库相对，这是有意设计，不是缺陷。
+
+### 本节消耗
+
+7 次 Run（含一次 CaseIntegrityError）。累计 credits 99,984 → 99,963。
