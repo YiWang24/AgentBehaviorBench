@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from kuma import create_run  # noqa: E402
 from kuma.contracts import TestReport  # noqa: E402
 
-from kuma_cases import CASES, TradingAgentsCaseProvider  # noqa: E402
+from kuma_cases import TradingAgentsCaseProvider, _selected  # noqa: E402
 from worker import run_case  # noqa: E402
 
 OUT = os.environ.get("BENCH_OUT", "/out")
@@ -134,8 +134,13 @@ def _check(checks: dict, out: dict) -> list[str]:
 RUBRIC: dict = {
     c["input_id"]: {"intent": c["intent"], "polarity": c["polarity"],
                     "checks": c["checks"]}
-    for c in CASES
+    for c in _selected()
 }
+
+# KUMA_OFFICIAL_JUDGE=1 hands judging to the hosted service instead of the
+# local rubric checker. That uploads submission output and the selected log
+# files, so it is opt-in.
+OFFICIAL_JUDGE = os.environ.get("KUMA_OFFICIAL_JUDGE") == "1"
 RESULTS: list[dict] = []
 
 
@@ -175,8 +180,8 @@ def main() -> None:
         repo_path=os.environ.get("BENCH_REPO", "/opt/bench"),
         requirement_path=None,
         case_provider=TradingAgentsCaseProvider(),
-        judge_provider=judge,
-        max_inputs=len(CASES),
+        judge_provider=None if OFFICIAL_JUDGE else judge,
+        max_inputs=len(_selected()),
         on_failure="continue",
         track_files=False,
         save_local=True,

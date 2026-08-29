@@ -146,6 +146,13 @@ CASES: list[dict] = [
 ]
 
 
+def _selected() -> list[dict]:
+    """Optional subset via BENCH_CASE_IDS, so an official-Judge run stays cheap."""
+    import os
+    wanted = [s.strip() for s in os.environ.get("BENCH_CASE_IDS", "").split(",") if s.strip()]
+    return [c for c in CASES if c["input_id"] in wanted] if wanted else CASES
+
+
 def build_case(context) -> dict:
     """Custom Case Provider: returns the Mapping shape normalize_case accepts.
 
@@ -162,13 +169,13 @@ def build_case(context) -> dict:
                 "payload_type": "structured",
                 "public_constraints": {"polarity": c["polarity"]},
             }
-            for c in CASES
+            for c in _selected()
         ],
         "rubric": {
             c["input_id"]: {"intent": c["intent"],
                             "polarity": c["polarity"],
                             "checks": c["checks"]}
-            for c in CASES
+            for c in _selected()
         },
     }
 

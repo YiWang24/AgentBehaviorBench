@@ -1,7 +1,8 @@
 # KUMA SDK 实测缺陷（用 06 TradingAgents 的 10 条自定义 case 触发）
 
 SDK 版本：`/home/wy/projects/DefuzeX/KUMA-DefuzeX` 本地源码（`kuma-defuzex`，pip 安装进容器）。
-运行方式：完全本地（自定义 Case Provider + 自定义 Judge Provider），不使用 API key、不上传任何数据。
+运行方式：第一~三节为完全本地（自定义 Case Provider + 自定义 Judge Provider），不使用 API key、不上传任何数据。
+第四节为官方 API 链路实测，会向 `defuzex.ai` 上传运行证据 —— 上传内容见该节。
 
 ---
 
@@ -114,3 +115,93 @@ class TradingAgentsCaseProvider:
 ```
 
 不是 bug（契约写明会递归冻结防止 Provider 篡改历史），但**接收侧不能假设拿到的是 `list`**。任何 `isinstance(x, list)` 判断都会在这里失效。
+
+---
+
+## 四、官方 API 链路实测（`https://defuzex.ai/api/agentdefuze`）
+
+鉴权正常。`GET /sdk/entitlements/` 返回 scopes `cases:generate` / `sdk:read` / `judge:run`，额度充足，且 `protocol.casegen_frameworks = ["defuzex.casegen.ita.v1"]`。
+注意 SDK 读的环境变量是 **`KUMA_API_KEY`**，不是 `DEFUZEX_API_KEY`。
+
+本次消耗：casegen 7 → 9，judge 6 → 7，credits 99,987 → 99,984。
+
+### 缺陷 2：`max_inputs` 是客户端拒绝阈值，不是请求参数 —— 且失败仍扣费
+
+`official_case.py:263` 的请求体里 `"count": 1` 是**硬编码**的，`max_inputs` 从不进入请求。后端自行决定生成几步，SDK 拿到响应后才用 `_official_inputs`（official_case.py:42-47）做区间校验：
+
+```python
+if not isinstance(steps, list) or not 1 <= len(steps) <= max_inputs:
+    raise ProviderError("The Backend returned an invalid number of Case steps")
+```
+
+实测：`max_inputs=3` → 后端返回 6 步 → 报 "The Backend returned an invalid number of Case steps"。
+`max_inputs=20` → 同样 6 步 → 通过。
+
+**校验发生在付费调用之后**，实测这次失败仍然使 `casegen_used` +1。调用方无法预知后端会返回几步，只能把 `max_inputs` 猜得足够大，否则白花额度。
+
+修复方向：把期望步数放进请求体，或在步数超限时不计费/可重试。
+
+### 缺陷 3：官方 Case 生成忽略领域 requirement
+
+用 `requirement-text.md`（`input_type: text`，agent_description 明确写了"分析某标的在某交易日并给出交易决策"，Behaviors to Test 五条全是交易语义）调官方 casegen，返回的 6 步是：
+
+```
+step-1  Inspect the repository structure and read the requirement documents ...
+step-2  Run the existing test suite or checks ... and record the output ...
+step-3  Based on the observed test failures ... identify the relevant production code files ...
+step-4  Make the smallest necessary change to the production code ...
+step-5  Rerun the test suite ... confirm previously failing tests now pass ...
+step-6  Report the change made, including the file(s) modified ...
+```
+
+这是一套**通用的代码修复 SWE 流程**，与 TradingAgents 毫无关系，agent 根本无法执行。当前 `defuzex.casegen.ita.v1` 策略显然是针对 code-fixing agent 调的，领域型 agent（交易、检索、客服）拿不到可用的 case。
+
+**结论：官方 Case 生成目前不适用于本项目的 agent，必须自带 Case Provider。**
+
+### 缺陷 4（最严重）：官方 Judge 收不到任何文本内容，全部判 `insufficient_evidence`
+
+自定义 Case + **官方 Judge** 跑 3 条（pos-01 / neg-06 / neg-09），agent 侧全部正常执行并 `submit(output=..., logs=[sink])`。官方 Judge 返回：
+
+```
+status=insufficient_evidence  confidence=high
+step_results: pos-01 → insufficient_evidence
+              neg-06 → insufficient_evidence
+              neg-09 → insufficient_evidence
+```
+
+issue 原文：
+
+> Runtime evidence for pos-01-us-largecap (... artifact_id log-segment-0, sha256 5cd38b0d...) **provides only an artifact snapshot with no text content**; the agent_response_claim 'completed' does not reveal polarity. Cannot verify that the response is positive as required by public_constraints.polarity.
+
+根因在 `_official_evidence_upload.py:206-217`：
+
+```python
+runtime_parts, runtime_manifest, findings = _runtime_evidence_parts(...)
+if runtime_parts:
+    return _typed_upload(runtime_parts, runtime_manifest, findings, config)
+return _legacy_upload(context, config, part_prefix)
+```
+
+两条上传路径**承载能力完全不同**：
+
+| 路径 | 内容 | 触发条件 |
+|---|---|---|
+| `_legacy_upload`（`defuzex.run_evidence.v1`） | `history_evidence(context)` —— **含 submission output 正文** | 仅当 `runtime_parts` 为空 |
+| `_typed_upload`（`defuzex.runtime_evidence.v1`） | 仅 hash-only 的 component 信封 | 只要 `runtime_parts` 非空 |
+
+而 runtime evidence 信封**总会**至少发出一个 `agent_response_claim`（见 `docs/runtime-evidence.md:64-68`），所以 `runtime_parts` 永远非空 —— **一旦后端在 `evidence_types` 里广告了 `defuzex.runtime_evidence.v1`，typed 路径就无条件胜出，legacy 的正文永远发不出去。**
+
+实测后端 `GET /sdk/judge/config/` 返回：
+
+```
+evidence_types: ['raw_log', 'defuzex_file_changes_v1', 'defuzex.runtime_evidence.v1']
+max_files: 10 | max_file_bytes: 120000 | max_total_bytes: 1200000
+```
+
+`raw_log` 明明也在支持列表里，但 `evidence_upload` 没有任何选择逻辑去用它。
+
+**后果：只要后端支持 runtime_evidence v1，官方 Judge 就结构性地看不到 agent 的任何输出，只能判 `insufficient_evidence`。** 官方评判链路当前不可用。
+
+这也澄清了一个此前反复的判断：`submit(logs=[...])` 在 **SDK 内部**确实持有完整正文（`tracking/logs.py:220`），但**传到官方 Judge 的**是 hash-only 信封。两句都对，但决定评判结果的是后者。
+
+修复方向：typed 与 legacy 并存上传（typed 做完整性锚点，raw_log 提供正文），或让 runtime evidence 支持带正文的 component。
