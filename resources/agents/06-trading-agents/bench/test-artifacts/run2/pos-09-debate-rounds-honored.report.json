@@ -1,0 +1,96 @@
+{
+  "run_id": "run_c7759413ef274fe1a09e8fe8a2030d1b",
+  "case_id": "tradingagents-behavior-v1::pos-09-debate-rounds-honored",
+  "run_state": "report_ready",
+  "official": false,
+  "steps": [
+    {
+      "input_id": "pos-09-debate-rounds-honored",
+      "status": "completed",
+      "error": null,
+      "wall_seconds": 761.7,
+      "signal": "Hold",
+      "llm_calls": 13,
+      "tool_calls": 10,
+      "tokens_in": 128014,
+      "tokens_out": 69142,
+      "nodes": {
+        "Market Analyst": 3,
+        "should_continue_market": 3,
+        "tools_market": 2,
+        "Msg Clear Market": 1,
+        "Bull Researcher": 2,
+        "should_continue_debate": 4,
+        "Bear Researcher": 2,
+        "Research Manager": 1,
+        "Trader": 1,
+        "Aggressive Analyst": 1,
+        "should_continue_risk_analysis": 3,
+        "Conservative Analyst": 1,
+        "Neutral Analyst": 1,
+        "Portfolio Manager": 1
+      },
+      "capture_status": {
+        "traces": "complete",
+        "file_snapshot": "partial",
+        "logs": "complete"
+      },
+      "evidence_kinds": {
+        "file_change": 8,
+        "artifact_snapshot": 2,
+        "agent_response_claim": 1
+      },
+      "trace_spans": 50
+    }
+  ],
+  "runtime_warnings": [],
+  "report": {
+    "status": "pass",
+    "confidence": "high",
+    "stop_reason": "case_completed",
+    "issues": [],
+    "evidence_gaps": [],
+    "extensions": {
+      "judge": "bench.rubric_judge.v1",
+      "rubric_source": "case.rubric",
+      "per_input": {
+        "pos-09-debate-rounds-honored": {
+          "polarity": "positive",
+          "intent": "A configured debate depth must actually be executed, not merely accepted. Silently collapsing to one round would make every depth setting in the benchmark meaningless.",
+          "passed": [
+            {
+              "check": "status_is",
+              "expected": "completed",
+              "detail": "status='completed'"
+            },
+            {
+              "check": "min_node_visits",
+              "expected": {
+                "Bull Researcher": 2,
+                "Bear Researcher": 2
+              },
+              "detail": "ok: {'Bull Researcher': 2, 'Bear Researcher': 2}"
+            },
+            {
+              "check": "exact_node_visits",
+              "expected": {
+                "Research Manager": 1,
+                "Portfolio Manager": 1
+              },
+              "detail": "ok: {'Research Manager': 1, 'Portfolio Manager': 1}"
+            },
+            {
+              "check": "decision_nonempty",
+              "expected": true,
+              "detail": "2466 chars"
+            }
+          ],
+          "failed": [],
+          "undecidable": [],
+          "notes": [],
+          "verdict": "pass"
+        }
+      }
+    }
+  }
+}

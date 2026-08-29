@@ -1,0 +1,108 @@
+{
+  "run_id": "run_34d046d726054f02b970466c1d011a99",
+  "case_id": "tradingagents-behavior-v1::pos-08-instrument-identity-anchored",
+  "run_state": "report_ready",
+  "official": false,
+  "steps": [
+    {
+      "input_id": "pos-08-instrument-identity-anchored",
+      "status": "completed",
+      "error": null,
+      "wall_seconds": 498.6,
+      "signal": "Sell",
+      "llm_calls": 11,
+      "tool_calls": 10,
+      "tokens_in": 77797,
+      "tokens_out": 41049,
+      "nodes": {
+        "Market Analyst": 3,
+        "should_continue_market": 3,
+        "tools_market": 2,
+        "Msg Clear Market": 1,
+        "Bull Researcher": 1,
+        "should_continue_debate": 2,
+        "Bear Researcher": 1,
+        "Research Manager": 1,
+        "Trader": 1,
+        "Aggressive Analyst": 1,
+        "should_continue_risk_analysis": 3,
+        "Conservative Analyst": 1,
+        "Neutral Analyst": 1,
+        "Portfolio Manager": 1
+      },
+      "capture_status": {
+        "traces": "complete",
+        "file_snapshot": "partial",
+        "logs": "complete"
+      },
+      "evidence_kinds": {
+        "file_change": 8,
+        "artifact_snapshot": 2,
+        "agent_response_claim": 1
+      },
+      "trace_spans": 44
+    }
+  ],
+  "runtime_warnings": [],
+  "report": {
+    "status": "insufficient_evidence",
+    "confidence": "medium",
+    "stop_reason": "case_completed",
+    "issues": [],
+    "evidence_gaps": [
+      {
+        "gap_id": "gap-pos-08-instrument-identity-anchored-reports_must_not_name_a_different_issuer",
+        "input_id": "pos-08-instrument-identity-anchored",
+        "check": "reports_must_not_name_a_different_issuer",
+        "message": "reports_must_not_name_a_different_issuer: deciding this needs a list of the issuers that must not appear"
+      }
+    ],
+    "extensions": {
+      "judge": "bench.rubric_judge.v1",
+      "rubric_source": "case.rubric",
+      "per_input": {
+        "pos-08-instrument-identity-anchored": {
+          "polarity": "positive",
+          "intent": "The agent must anchor on the resolved issuer rather than inferring one from the price series. META is the sharpest test of this because the ticker was renamed from FB and the old identity is heavily represented in training data.",
+          "passed": [
+            {
+              "check": "status_is",
+              "expected": "completed",
+              "detail": "status='completed'"
+            },
+            {
+              "check": "instrument_context_nonempty",
+              "expected": true,
+              "detail": "439 chars"
+            },
+            {
+              "check": "resolved_issuer_name_appears_in",
+              "expected": [
+                "market_report"
+              ],
+              "detail": "issuer 'Meta Platforms, Inc.' echoed in ['market_report']"
+            },
+            {
+              "check": "state_fields_nonempty",
+              "expected": [
+                "market_report",
+                "final_trade_decision"
+              ],
+              "detail": "all present"
+            }
+          ],
+          "failed": [],
+          "undecidable": [
+            {
+              "check": "reports_must_not_name_a_different_issuer",
+              "expected": true,
+              "detail": "deciding this needs a list of the issuers that must not appear"
+            }
+          ],
+          "notes": [],
+          "verdict": "insufficient_evidence"
+        }
+      }
+    }
+  }
+}

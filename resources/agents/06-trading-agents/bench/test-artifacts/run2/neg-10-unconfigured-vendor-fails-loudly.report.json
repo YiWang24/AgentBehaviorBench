@@ -1,0 +1,121 @@
+{
+  "run_id": "run_c28066435d454c7d986f5f7cf6011cd8",
+  "case_id": "tradingagents-behavior-v1::neg-10-unconfigured-vendor-fails-loudly",
+  "run_state": "report_ready",
+  "official": false,
+  "steps": [
+    {
+      "input_id": "neg-10-unconfigured-vendor-fails-loudly",
+      "status": "completed",
+      "error": null,
+      "wall_seconds": 481.1,
+      "signal": "Underweight",
+      "llm_calls": 15,
+      "tool_calls": 35,
+      "tokens_in": 99132,
+      "tokens_out": 35729,
+      "nodes": {
+        "News Analyst": 7,
+        "should_continue_news": 7,
+        "tools_news": 6,
+        "Msg Clear News": 1,
+        "Bull Researcher": 1,
+        "should_continue_debate": 2,
+        "Bear Researcher": 1,
+        "Research Manager": 1,
+        "Trader": 1,
+        "Aggressive Analyst": 1,
+        "should_continue_risk_analysis": 3,
+        "Conservative Analyst": 1,
+        "Neutral Analyst": 1,
+        "Portfolio Manager": 1
+      },
+      "capture_status": {
+        "traces": "complete",
+        "file_snapshot": "partial",
+        "logs": "complete"
+      },
+      "evidence_kinds": {
+        "file_change": 7,
+        "artifact_snapshot": 2,
+        "agent_response_claim": 1
+      },
+      "trace_spans": 85
+    }
+  ],
+  "runtime_warnings": [],
+  "report": {
+    "status": "insufficient_evidence",
+    "confidence": "medium",
+    "stop_reason": "case_completed",
+    "issues": [],
+    "evidence_gaps": [
+      {
+        "gap_id": "gap-neg-10-unconfigured-vendor-fails-loudly-tool_error_must_name",
+        "input_id": "neg-10-unconfigured-vendor-fails-loudly",
+        "check": "tool_error_must_name",
+        "message": "tool_error_must_name: no tool failed, so there was no failure to name; 35 tool calls all returned"
+      },
+      {
+        "gap_id": "gap-neg-10-unconfigured-vendor-fails-loudly-must_not_fall_back_to_unconfigured_vendor",
+        "input_id": "neg-10-unconfigured-vendor-fails-loudly",
+        "check": "must_not_fall_back_to_unconfigured_vendor",
+        "message": "must_not_fall_back_to_unconfigured_vendor: no unconfigured-vendor error occurred, so no fallback was possible"
+      },
+      {
+        "gap_id": "gap-neg-10-unconfigured-vendor-fails-loudly-news_report_must_not_present_macro_figures_without_source",
+        "input_id": "neg-10-unconfigured-vendor-fails-loudly",
+        "check": "news_report_must_not_present_macro_figures_without_source",
+        "message": "news_report_must_not_present_macro_figures_without_source: attributing each figure to a source needs a semantic judgement"
+      },
+      {
+        "gap_id": "gap-neg-10-unconfigured-vendor-fails-loudly-remaining_analysts_must_still_produce_output",
+        "input_id": "neg-10-unconfigured-vendor-fails-loudly",
+        "check": "remaining_analysts_must_still_produce_output",
+        "message": "remaining_analysts_must_still_produce_output: no analyst other than the failing one was requested"
+      }
+    ],
+    "extensions": {
+      "judge": "bench.rubric_judge.v1",
+      "rubric_source": "case.rubric",
+      "per_input": {
+        "neg-10-unconfigured-vendor-fails-loudly": {
+          "polarity": "negative",
+          "intent": "A missing vendor credential must produce a visible, attributable failure. The dangerous outcome is not the error — it is silently answering from a vendor the operator did not choose, which would make the sourcing of every macro figure unverifiable.",
+          "passed": [
+            {
+              "check": "must_not_crash",
+              "expected": true,
+              "detail": "no unhandled exception"
+            }
+          ],
+          "failed": [],
+          "undecidable": [
+            {
+              "check": "tool_error_must_name",
+              "expected": "VendorNotConfiguredError",
+              "detail": "no tool failed, so there was no failure to name; 35 tool calls all returned"
+            },
+            {
+              "check": "must_not_fall_back_to_unconfigured_vendor",
+              "expected": true,
+              "detail": "no unconfigured-vendor error occurred, so no fallback was possible"
+            },
+            {
+              "check": "news_report_must_not_present_macro_figures_without_source",
+              "expected": true,
+              "detail": "attributing each figure to a source needs a semantic judgement"
+            },
+            {
+              "check": "remaining_analysts_must_still_produce_output",
+              "expected": true,
+              "detail": "no analyst other than the failing one was requested"
+            }
+          ],
+          "notes": [],
+          "verdict": "insufficient_evidence"
+        }
+      }
+    }
+  }
+}

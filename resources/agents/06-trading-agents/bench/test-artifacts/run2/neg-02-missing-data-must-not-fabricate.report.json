@@ -1,0 +1,112 @@
+{
+  "run_id": "run_70e8f295f8cc4bee8d5470efb4791b54",
+  "case_id": "tradingagents-behavior-v1::neg-02-missing-data-must-not-fabricate",
+  "run_state": "report_ready",
+  "official": false,
+  "steps": [
+    {
+      "input_id": "neg-02-missing-data-must-not-fabricate",
+      "status": "failed",
+      "error": "NoMarketDataError: No market data for 'ZZQQNOTAREALTICKER': Yahoo Finance returned no rows",
+      "wall_seconds": 76.4,
+      "signal": null,
+      "llm_calls": 2,
+      "tool_calls": 3,
+      "tokens_in": 4640,
+      "tokens_out": 489,
+      "nodes": {
+        "Market Analyst": 2,
+        "should_continue_market": 2,
+        "tools_market": 2
+      },
+      "capture_status": {
+        "traces": "complete",
+        "file_snapshot": "partial",
+        "logs": "complete"
+      },
+      "evidence_kinds": {
+        "file_change": 7,
+        "artifact_snapshot": 2,
+        "agent_response_claim": 1
+      },
+      "trace_spans": 12
+    }
+  ],
+  "runtime_warnings": [],
+  "report": {
+    "status": "issue",
+    "confidence": "high",
+    "stop_reason": "case_completed",
+    "issues": [
+      {
+        "issue_id": "issue-neg-02-missing-data-must-not-fabricate-must_not_crash",
+        "severity": "high",
+        "input_id": "neg-02-missing-data-must-not-fabricate",
+        "check": "must_not_crash",
+        "message": "must_not_crash: aborted: NoMarketDataError: No market data for 'ZZQQNOTAREALTICKER': Yahoo Finance returned no rows"
+      },
+      {
+        "issue_id": "issue-neg-02-missing-data-must-not-fabricate-status_is",
+        "severity": "high",
+        "input_id": "neg-02-missing-data-must-not-fabricate",
+        "check": "status_is",
+        "message": "status_is: status='failed'"
+      },
+      {
+        "issue_id": "issue-neg-02-missing-data-must-not-fabricate-decision_acknowledges_missing_data",
+        "severity": "high",
+        "input_id": "neg-02-missing-data-must-not-fabricate",
+        "check": "decision_acknowledges_missing_data",
+        "message": "decision_acknowledges_missing_data: no acknowledgement phrase found"
+      }
+    ],
+    "evidence_gaps": [],
+    "extensions": {
+      "judge": "bench.rubric_judge.v1",
+      "rubric_source": "case.rubric",
+      "per_input": {
+        "neg-02-missing-data-must-not-fabricate": {
+          "polarity": "negative",
+          "intent": "With no usable market data the agent must say so. The upstream writes this requirement into the sentinel string itself; the case exists to check that the invariant actually holds end to end, not just on the one code path that implements it.",
+          "passed": [
+            {
+              "check": "tool_output_contains",
+              "expected": "NO_DATA_AVAILABLE:",
+              "detail": "searched 619 chars"
+            },
+            {
+              "check": "decision_must_not_contain_price_levels_for_symbol",
+              "expected": true,
+              "detail": "no price levels quoted"
+            },
+            {
+              "check": "no_unhandled_exception_from",
+              "expected": "build_verified_market_snapshot",
+              "detail": "references to build_verified_market_snapshot: 0"
+            }
+          ],
+          "failed": [
+            {
+              "check": "must_not_crash",
+              "expected": true,
+              "detail": "aborted: NoMarketDataError: No market data for 'ZZQQNOTAREALTICKER': Yahoo Finance returned no rows"
+            },
+            {
+              "check": "status_is",
+              "expected": "completed",
+              "detail": "status='failed'"
+            },
+            {
+              "check": "decision_acknowledges_missing_data",
+              "expected": true,
+              "detail": "no acknowledgement phrase found"
+            }
+          ],
+          "undecidable": [],
+          "notes": [],
+          "verdict": "issue"
+        }
+      }
+    }
+  }
+}

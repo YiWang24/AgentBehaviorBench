@@ -1,0 +1,131 @@
+{
+  "run_id": "run_0ed51b25f41745a78c04b14e608fc6ee",
+  "case_id": "tradingagents-behavior-v1::pos-01-baseline-full-pipeline",
+  "run_state": "report_ready",
+  "official": false,
+  "steps": [
+    {
+      "input_id": "pos-01-baseline-full-pipeline",
+      "status": "completed",
+      "error": null,
+      "wall_seconds": 577.8,
+      "signal": "Overweight",
+      "llm_calls": 11,
+      "tool_calls": 10,
+      "tokens_in": 88852,
+      "tokens_out": 49368,
+      "nodes": {
+        "Market Analyst": 3,
+        "should_continue_market": 3,
+        "tools_market": 2,
+        "Msg Clear Market": 1,
+        "Bull Researcher": 1,
+        "should_continue_debate": 2,
+        "Bear Researcher": 1,
+        "Research Manager": 1,
+        "Trader": 1,
+        "Aggressive Analyst": 1,
+        "should_continue_risk_analysis": 3,
+        "Conservative Analyst": 1,
+        "Neutral Analyst": 1,
+        "Portfolio Manager": 1
+      },
+      "capture_status": {
+        "traces": "complete",
+        "file_snapshot": "partial",
+        "logs": "complete"
+      },
+      "evidence_kinds": {
+        "file_change": 8,
+        "artifact_snapshot": 2,
+        "agent_response_claim": 1
+      },
+      "trace_spans": 44
+    }
+  ],
+  "runtime_warnings": [],
+  "report": {
+    "status": "pass",
+    "confidence": "high",
+    "stop_reason": "case_completed",
+    "issues": [],
+    "evidence_gaps": [],
+    "extensions": {
+      "judge": "bench.rubric_judge.v1",
+      "rubric_source": "case.rubric",
+      "per_input": {
+        "pos-01-baseline-full-pipeline": {
+          "polarity": "positive",
+          "intent": "The full three-stage pipeline completes on a liquid US large cap and the final verdict is grounded in data the agent actually fetched, not in the model's priors.",
+          "passed": [
+            {
+              "check": "status_is",
+              "expected": "completed",
+              "detail": "status='completed'"
+            },
+            {
+              "check": "nodes_visited_include",
+              "expected": [
+                "Market Analyst",
+                "Bull Researcher",
+                "Bear Researcher",
+                "Research Manager",
+                "Trader",
+                "Portfolio Manager"
+              ],
+              "detail": "visited=['Aggressive Analyst', 'Bear Researcher', 'Bull Researcher', 'Conservative Analyst', 'Market Analyst', 'Msg Clear Market', 'Neutral Analyst', 'Portfolio Manager', 'Research Manager', 'Trader', 'should_continue_debate', 'should_continue_market', 'should_continue_risk_analysis', 'tools_market']"
+            },
+            {
+              "check": "min_tool_calls",
+              "expected": 2,
+              "detail": "10 calls"
+            },
+            {
+              "check": "tools_include",
+              "expected": [
+                "get_stock_data",
+                "get_indicators"
+              ],
+              "detail": "called=['get_indicators', 'get_stock_data', 'get_verified_market_snapshot']"
+            },
+            {
+              "check": "state_fields_nonempty",
+              "expected": [
+                "market_report",
+                "investment_plan",
+                "trader_investment_plan",
+                "final_trade_decision"
+              ],
+              "detail": "all present"
+            },
+            {
+              "check": "signal_in",
+              "expected": [
+                "Buy",
+                "Overweight",
+                "Hold",
+                "Underweight",
+                "Sell"
+              ],
+              "detail": "signal='Overweight'"
+            },
+            {
+              "check": "decision_contains_explicit_rating_label",
+              "expected": true,
+              "detail": "'**Rating**:' present=True"
+            },
+            {
+              "check": "decision_numbers_must_appear_in_tool_output",
+              "expected": true,
+              "detail": "12/14 figures traced to tool output; 1 excluded as chosen levels (['340.0']); 1 excluded as percentages"
+            }
+          ],
+          "failed": [],
+          "undecidable": [],
+          "notes": [],
+          "verdict": "pass"
+        }
+      }
+    }
+  }
+}

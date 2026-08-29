@@ -1,0 +1,106 @@
+{
+  "run_id": "run_9ebe0571b009472ab247d3e953b05955",
+  "case_id": "tradingagents-behavior-v1::neg-03-parallel-market-tools-must-not-deadlock",
+  "run_state": "report_ready",
+  "official": false,
+  "steps": [
+    {
+      "input_id": "neg-03-parallel-market-tools-must-not-deadlock",
+      "status": "completed",
+      "error": null,
+      "wall_seconds": 521.2,
+      "signal": "Hold",
+      "llm_calls": 12,
+      "tool_calls": 10,
+      "tokens_in": 130459,
+      "tokens_out": 44129,
+      "nodes": {
+        "Market Analyst": 4,
+        "should_continue_market": 4,
+        "tools_market": 3,
+        "Msg Clear Market": 1,
+        "Bull Researcher": 1,
+        "should_continue_debate": 2,
+        "Bear Researcher": 1,
+        "Research Manager": 1,
+        "Trader": 1,
+        "Aggressive Analyst": 1,
+        "should_continue_risk_analysis": 3,
+        "Conservative Analyst": 1,
+        "Neutral Analyst": 1,
+        "Portfolio Manager": 1
+      },
+      "capture_status": {
+        "traces": "complete",
+        "file_snapshot": "partial",
+        "logs": "complete"
+      },
+      "evidence_kinds": {
+        "file_change": 8,
+        "artifact_snapshot": 2,
+        "agent_response_claim": 1
+      },
+      "trace_spans": 48
+    }
+  ],
+  "runtime_warnings": [],
+  "report": {
+    "status": "insufficient_evidence",
+    "confidence": "medium",
+    "stop_reason": "case_completed",
+    "issues": [],
+    "evidence_gaps": [
+      {
+        "gap_id": "gap-neg-03-parallel-market-tools-must-not-deadlock-partial_tool_failure_must_degrade_not_abort",
+        "input_id": "neg-03-parallel-market-tools-must-not-deadlock",
+        "check": "partial_tool_failure_must_degrade_not_abort",
+        "message": "partial_tool_failure_must_degrade_not_abort: no tool failed, so degradation was not exercised"
+      }
+    ],
+    "extensions": {
+      "judge": "bench.rubric_judge.v1",
+      "rubric_source": "case.rubric",
+      "per_input": {
+        "neg-03-parallel-market-tools-must-not-deadlock": {
+          "polarity": "negative",
+          "intent": "The market ToolNode runs its calls in parallel. Two independent yfinance paths must not corrupt each other's cache initialisation, and a data-layer race must never take down the whole run.",
+          "passed": [
+            {
+              "check": "status_is",
+              "expected": "completed",
+              "detail": "status='completed'"
+            },
+            {
+              "check": "error_message_must_not_match",
+              "expected": "database is locked",
+              "detail": "searched 1 chars of error text"
+            },
+            {
+              "check": "no_tool_error_events",
+              "expected": true,
+              "detail": "0 tool errors"
+            },
+            {
+              "check": "if_batched_both_tools_must_return",
+              "expected": [
+                "get_stock_data",
+                "get_verified_market_snapshot"
+              ],
+              "detail": "both returned"
+            }
+          ],
+          "failed": [],
+          "undecidable": [
+            {
+              "check": "partial_tool_failure_must_degrade_not_abort",
+              "expected": true,
+              "detail": "no tool failed, so degradation was not exercised"
+            }
+          ],
+          "notes": [],
+          "verdict": "insufficient_evidence"
+        }
+      }
+    }
+  }
+}

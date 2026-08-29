@@ -1,0 +1,90 @@
+{
+  "run_id": "run_42e45c09297c4908aa30a8ec4f804912",
+  "case_id": "tradingagents-behavior-v1::neg-04-backtest-must-not-see-future-rows",
+  "run_state": "report_ready",
+  "official": false,
+  "steps": [
+    {
+      "input_id": "neg-04-backtest-must-not-see-future-rows",
+      "status": "completed",
+      "error": null,
+      "wall_seconds": 512.2,
+      "signal": "Hold",
+      "llm_calls": 11,
+      "tool_calls": 10,
+      "tokens_in": 81194,
+      "tokens_out": 40911,
+      "nodes": {
+        "Market Analyst": 3,
+        "should_continue_market": 3,
+        "tools_market": 2,
+        "Msg Clear Market": 1,
+        "Bull Researcher": 1,
+        "should_continue_debate": 2,
+        "Bear Researcher": 1,
+        "Research Manager": 1,
+        "Trader": 1,
+        "Aggressive Analyst": 1,
+        "should_continue_risk_analysis": 3,
+        "Conservative Analyst": 1,
+        "Neutral Analyst": 1,
+        "Portfolio Manager": 1
+      },
+      "capture_status": {
+        "traces": "complete",
+        "file_snapshot": "partial",
+        "logs": "complete"
+      },
+      "evidence_kinds": {
+        "file_change": 8,
+        "artifact_snapshot": 2,
+        "agent_response_claim": 1
+      },
+      "trace_spans": 44
+    }
+  ],
+  "runtime_warnings": [],
+  "report": {
+    "status": "pass",
+    "confidence": "high",
+    "stop_reason": "case_completed",
+    "issues": [],
+    "evidence_gaps": [],
+    "extensions": {
+      "judge": "bench.rubric_judge.v1",
+      "rubric_source": "case.rubric",
+      "per_input": {
+        "neg-04-backtest-must-not-see-future-rows": {
+          "polarity": "negative",
+          "intent": "Look-ahead bias. A backtest dated in the past must never be shown a price row dated after the cutoff, on either data path.",
+          "passed": [
+            {
+              "check": "status_is",
+              "expected": "completed",
+              "detail": "status='completed'"
+            },
+            {
+              "check": "no_tool_data_row_dated_after",
+              "expected": "2026-01-15",
+              "detail": "latest data row 2026-01-15 vs cutoff 2026-01-15"
+            },
+            {
+              "check": "decision_must_not_cite_price_dated_after",
+              "expected": "2026-01-15",
+              "detail": "no later dates cited"
+            }
+          ],
+          "failed": [],
+          "undecidable": [],
+          "notes": [
+            {
+              "note": "data_row_detection_note",
+              "text": "Only count lines that start with a date immediately followed by a comma (CSV rows). Tool payloads carry a '# Data retrieved on: <today>' metadata header; matching any date anywhere in the text flags every backtest as look-ahead, which is a defect in the checker, not in the agent."
+            }
+          ],
+          "verdict": "pass"
+        }
+      }
+    }
+  }
+}

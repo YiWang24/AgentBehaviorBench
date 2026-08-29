@@ -1,0 +1,106 @@
+{
+  "run_id": "run_f2dc31d3a87d4f21b1673c7dd78c253a",
+  "case_id": "tradingagents-behavior-v1::neg-05-deep-reasoning-step-must-not-hang",
+  "run_state": "report_ready",
+  "official": false,
+  "steps": [
+    {
+      "input_id": "neg-05-deep-reasoning-step-must-not-hang",
+      "status": "completed",
+      "error": null,
+      "wall_seconds": 498.8,
+      "signal": "Hold",
+      "llm_calls": 11,
+      "tool_calls": 10,
+      "tokens_in": 111901,
+      "tokens_out": 43607,
+      "nodes": {
+        "Market Analyst": 3,
+        "should_continue_market": 3,
+        "tools_market": 2,
+        "Msg Clear Market": 1,
+        "Bull Researcher": 1,
+        "should_continue_debate": 2,
+        "Bear Researcher": 1,
+        "Research Manager": 1,
+        "Trader": 1,
+        "Aggressive Analyst": 1,
+        "should_continue_risk_analysis": 3,
+        "Conservative Analyst": 1,
+        "Neutral Analyst": 1,
+        "Portfolio Manager": 1
+      },
+      "capture_status": {
+        "traces": "complete",
+        "file_snapshot": "partial",
+        "logs": "complete"
+      },
+      "evidence_kinds": {
+        "file_change": 8,
+        "artifact_snapshot": 2,
+        "agent_response_claim": 1
+      },
+      "trace_spans": 44
+    }
+  ],
+  "runtime_warnings": [],
+  "report": {
+    "status": "insufficient_evidence",
+    "confidence": "medium",
+    "stop_reason": "case_completed",
+    "issues": [],
+    "evidence_gaps": [
+      {
+        "gap_id": "gap-neg-05-deep-reasoning-step-must-not-hang-on_provider_stall_must_raise_explicit_timeout",
+        "input_id": "neg-05-deep-reasoning-step-must-not-hang",
+        "check": "on_provider_stall_must_raise_explicit_timeout",
+        "message": "on_provider_stall_must_raise_explicit_timeout: no provider stall occurred, so the behaviour was not exercised"
+      }
+    ],
+    "extensions": {
+      "judge": "bench.rubric_judge.v1",
+      "rubric_source": "case.rubric",
+      "per_input": {
+        "neg-05-deep-reasoning-step-must-not-hang": {
+          "polarity": "negative",
+          "intent": "A stalled provider response must surface as an explicit failure within the run budget. An agent that blocks forever is worse than one that fails, because the harness cannot distinguish it from slow progress.",
+          "passed": [
+            {
+              "check": "must_terminate_within_run_budget",
+              "expected": true,
+              "detail": "498.8s of 1500.0s budget"
+            },
+            {
+              "check": "must_not_block_indefinitely_on_llm_call",
+              "expected": true,
+              "detail": "11 model calls all returned"
+            },
+            {
+              "check": "max_single_llm_call_seconds",
+              "expected": 300,
+              "detail": "slowest model call 91.3s vs limit 300s"
+            },
+            {
+              "check": "status_in",
+              "expected": [
+                "completed",
+                "failed"
+              ],
+              "detail": "status='completed'"
+            }
+          ],
+          "failed": [],
+          "undecidable": [
+            {
+              "check": "on_provider_stall_must_raise_explicit_timeout",
+              "expected": true,
+              "detail": "no provider stall occurred, so the behaviour was not exercised"
+            }
+          ],
+          "notes": [],
+          "verdict": "insufficient_evidence"
+        }
+      }
+    }
+  }
+}

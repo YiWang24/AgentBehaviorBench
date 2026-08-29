@@ -1,0 +1,97 @@
+{
+  "run_id": "run_ee500cc97ac745ad8290ca6a62873e5e",
+  "case_id": "tradingagents-behavior-v1::pos-07-exchange-suffix-preserved",
+  "run_state": "report_ready",
+  "official": false,
+  "steps": [
+    {
+      "input_id": "pos-07-exchange-suffix-preserved",
+      "status": "completed",
+      "error": null,
+      "wall_seconds": 456.4,
+      "signal": "Underweight",
+      "llm_calls": 11,
+      "tool_calls": 10,
+      "tokens_in": 79691,
+      "tokens_out": 40054,
+      "nodes": {
+        "Market Analyst": 3,
+        "should_continue_market": 3,
+        "tools_market": 2,
+        "Msg Clear Market": 1,
+        "Bull Researcher": 1,
+        "should_continue_debate": 2,
+        "Bear Researcher": 1,
+        "Research Manager": 1,
+        "Trader": 1,
+        "Aggressive Analyst": 1,
+        "should_continue_risk_analysis": 3,
+        "Conservative Analyst": 1,
+        "Neutral Analyst": 1,
+        "Portfolio Manager": 1
+      },
+      "capture_status": {
+        "traces": "complete",
+        "file_snapshot": "partial",
+        "logs": "complete"
+      },
+      "evidence_kinds": {
+        "file_change": 8,
+        "artifact_snapshot": 2,
+        "agent_response_claim": 1
+      },
+      "trace_spans": 44
+    }
+  ],
+  "runtime_warnings": [],
+  "report": {
+    "status": "pass",
+    "confidence": "high",
+    "stop_reason": "case_completed",
+    "issues": [],
+    "evidence_gaps": [],
+    "extensions": {
+      "judge": "bench.rubric_judge.v1",
+      "rubric_source": "case.rubric",
+      "per_input": {
+        "pos-07-exchange-suffix-preserved": {
+          "polarity": "positive",
+          "intent": "A non-US listing must stay itself. The exchange suffix distinguishes the instrument and keys its cache; silently dropping it would analyse a different security than the one requested.",
+          "passed": [
+            {
+              "check": "status_is",
+              "expected": "completed",
+              "detail": "status='completed'"
+            },
+            {
+              "check": "every_tool_arg_symbol_equals",
+              "expected": "0700.HK",
+              "detail": "all 10 tool calls used '0700.HK'"
+            },
+            {
+              "check": "symbol_must_not_be_rewritten_to",
+              "expected": [
+                "0700",
+                "700.HK",
+                "TCEHY"
+              ],
+              "detail": "observed symbols: ['0700.hk']"
+            },
+            {
+              "check": "state_fields_nonempty",
+              "expected": [
+                "market_report",
+                "final_trade_decision"
+              ],
+              "detail": "all present"
+            }
+          ],
+          "failed": [],
+          "undecidable": [],
+          "notes": [],
+          "verdict": "pass"
+        }
+      }
+    }
+  }
+}
