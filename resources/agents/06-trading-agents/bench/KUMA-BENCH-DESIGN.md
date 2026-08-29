@@ -153,7 +153,7 @@ get_stock_data          attrs={"gen_ai.operation.name":"execute_tool"}
 
 > **→ 每条 case 独立一个 Run、独立一个容器。** 这同时避开了
 > `ContainerRunLock` 的每容器单 Run 限制，也让一条 case 卡死不牵连其余九条
-> （TradingAgents 单条 6–8 分钟，pos-01 上一轮实测 392.3s）。
+> （TradingAgents 单条 7–14 分钟，pos-01 端到端实测 787s，见第九节）。
 
 ### D：文件跟踪比预想的便宜得多（本轮修正）
 
@@ -537,7 +537,7 @@ main()
 
 | 风险 | 说明 | 处置 |
 |---|---|---|
-| 单条 6–8 分钟 | pos-01 上一轮实测 392.3s；10 条串行约 1 小时 | 默认只跑 `--case` 指定的一条；`--all` 显式开启，支持并发 |
+| 单条 7–14 分钟 | `run-demo.sh` 端到端实测（659a88f）：pos-01 **787s**、11 次模型调用、11 次工具调用、92,459 in / 72,987 out、rating Hold、无错误；neg-06 路径穿越 18.8s 退出码 1。（`cases.json` 的 rubric 里另记有一次 392.3s，配置不同，按 787s 规划）**10 条串行约 2 小时** | 默认只跑 `--case` 指定的一条；`--all` 显式开启，支持并发 |
 | `deepseek-v4-flash` 深度推理挂死 | `run-demo.sh` 注释记录：Research Manager 的结构化输出调用复现两次冻结，>16 分钟、容器 0% CPU | 沿用 deep=`deepseek-v4-pro` 组合；容器级超时兜底 |
 | neg-05 就是在测这个挂死 | 该 case 的判定依赖超时行为 | 容器超时须映射成 `submit(status="timeout")` 而不是脚本崩溃 |
 | KUMA Run 锁 | 实测每容器单 Run | 每 case 独立容器，天然规避 |
