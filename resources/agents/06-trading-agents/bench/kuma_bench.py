@@ -1378,6 +1378,7 @@ def in_container(args: argparse.Namespace) -> int:
     from opentelemetry.sdk.trace import TracerProvider
 
     from kuma import create_run
+    from kuma.errors import KumaError
     from kuma.otel import configure_trace_evidence
 
     out_dir = Path(args.out)
@@ -1387,6 +1388,9 @@ def in_container(args: argparse.Namespace) -> int:
 
     doc = load_cases(args.cases)
     official = args.official
+    # --official-judge keeps our Case Provider and only swaps the Judge, which
+    # is KUMA's "custom Case with official Judge" row. --official implies it.
+    official_judge = args.official or args.official_judge
     inputs = (
         [] if official else select_inputs(doc, case_id=args.case, run_all=args.all)
     )
@@ -1401,7 +1405,7 @@ def in_container(args: argparse.Namespace) -> int:
     tracer = trace.get_tracer("abb.tradingagents")
     Bridge = build_bridge_class()
 
-    judge = None if official else RubricJudge()
+    judge = None if official_judge else RubricJudge()
     # The registry-level requirement lives in resources/requirements/, outside
     # the mounted bench directory, so the host stages a copy next to the
     # artifacts. Only the official path reads it: the ten grounded cases come
@@ -1475,12 +1479,31 @@ def in_container(args: argparse.Namespace) -> int:
             "error": error,
             "facts": facts,
         }
-        report = run.submit(
-            output,
-            status=status,
-            error=error,
-            logs=[sink] if sink.exists() else None,
-        )
+        try:
+            report = run.submit(
+                output,
+                status=status,
+                error=error,
+                logs=[sink] if sink.exists() else None,
+            )
+        except KumaError as exc:
+            # str(exc) is a fixed generic sentence chosen by
+            # transport/backend.py:_mapped_remote_error; the machine-readable
+            # cause lives on .code and .details and is otherwise never shown.
+            detail = {
+                "error_class": type(exc).__name__,
+                "code": getattr(exc, "code", None),
+                "details": getattr(exc, "details", None),
+                "retryable": getattr(exc, "retryable", None),
+                "message": str(exc),
+            }
+            print(f"[kuma] submit rejected: {json.dumps(detail, ensure_ascii=False, default=str)}",
+                  flush=True)
+            (out_dir / f"{input_id}.submit-error.json").write_text(
+                json.dumps(detail, ensure_ascii=False, indent=2, default=str) + "\n",
+                encoding="utf-8",
+            )
+            raise
         submission = run.history[-1].submission
         # For the saved artifact only. The Judge takes file evidence straight
         # off the Submission, because this assignment lands after submit() has
@@ -1531,6 +1554,8 @@ def in_container(args: argparse.Namespace) -> int:
         "case_id": run.case_id,
         "run_state": run.state,
         "official": official,
+        "official_judge": official_judge,
+        "judge_provider": "kuma.official" if official_judge else "bench.rubric_judge.v1",
         "steps": steps,
         "runtime_warnings": list(run.runtime_warnings),
         "report": None
@@ -1876,9 +1901,10 @@ def host(args: argparse.Namespace) -> int:
             "the repository .env (this worktree does not carry one).\n"
             f"Loaded environment file: {loaded}"
         )
-    if args.official and not os.environ.get("KUMA_API_KEY"):
+    if (args.official or args.official_judge) and not os.environ.get("KUMA_API_KEY"):
+        flag = "--official" if args.official else "--official-judge"
         raise SystemExit(
-            "--official needs KUMA_API_KEY (the .env stores the same dfx_ key as "
+            f"{flag} needs KUMA_API_KEY (the .env stores the same dfx_ key as "
             "DEFUZEX_API_KEY; --env-file bridges the names)."
         )
 
@@ -1899,8 +1925,11 @@ def host(args: argparse.Namespace) -> int:
     if args.official:
         jobs = [("official", ["--official"])]
     else:
+        # --official-judge keeps the per-case job list; only the Judge changes,
+        # so each container still runs one grounded case in its own KUMA Run.
+        extra = ["--official-judge"] if args.official_judge else []
         jobs = [
-            (item["input_id"], ["--case", item["input_id"]])
+            (item["input_id"], ["--case", item["input_id"], *extra])
             for item in select_inputs(doc, case_id=args.case, run_all=args.all)
         ]
 
@@ -2022,6 +2051,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "backend quota and uploads evidence. The Case comes from the "
             "backend, so its verdict is about that Case, not about the ten "
             "grounded ones -- see KUMA-BENCH-DESIGN.md section 7."
+        ),
+    )
+    parser.add_argument(
+        "--official-judge",
+        action="store_true",
+        help=(
+            "Keep the ten grounded cases but hand judging to the hosted Judge "
+            "(KUMA's 'custom Case with official Judge' combination). Consumes "
+            "judge quota and uploads evidence. Unlike --official the verdict is "
+            "about our cases, so it is the comparable one."
         ),
     )
     parser.add_argument("--cases", default=str(BENCH_DIR / "cases.json"))
