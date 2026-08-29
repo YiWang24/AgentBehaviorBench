@@ -310,6 +310,60 @@ def structural_checks() -> None:
     check("unbatched tools report undecidable, not pass", verdict is None)
 
 
+def identity_checks() -> None:
+    # resolve_instrument_context writes the identity inline, not on its own
+    # line. Measured on pos-08.
+    context = (
+        "The instrument to analyze is `META`. Use this exact ticker in every "
+        "tool call. Resolved identity: Company: Meta Platforms, Inc.; Business "
+        "classification: Communication Services; Exchange: NMS."
+    )
+    full = facts(state={"_instrument": context, "market_report": "Meta Platforms, Inc. traded up."})
+    verdict, detail = kb._check("resolved_issuer_name_appears_in", ["market_report"], full)
+    check("an inline issuer label is found", verdict is True, detail)
+
+    short = facts(state={"_instrument": context, "market_report": "Meta Platforms traded up."})
+    verdict, detail = kb._check("resolved_issuer_name_appears_in", ["market_report"], short)
+    check("the issuer matches without its corporate suffix", verdict is True, detail)
+
+    wrong = facts(state={"_instrument": context, "market_report": "Alphabet traded up."})
+    verdict, detail = kb._check("resolved_issuer_name_appears_in", ["market_report"], wrong)
+    check("a report about a different issuer is caught", verdict is False, detail)
+
+    unlabelled = facts(state={"_instrument": "The instrument to analyze is `META`."})
+    verdict, _detail = kb._check(
+        "resolved_issuer_name_appears_in", ["market_report"], unlabelled
+    )
+    check("an unlabelled context reports undecidable", verdict is None)
+
+
+def unexercised_hazards() -> None:
+    """A hazard that never fired is not the same as an agent that failed."""
+
+    # neg-10: every vendor this environment reached was configured, so there was
+    # no failure for the agent to name.
+    quiet = facts(
+        events=[
+            {"kind": "tool_start", "tool": "get_news", "run_id": "a"},
+            {"kind": "tool_end", "run_id": "a", "output": "headlines"},
+        ]
+    )
+    verdict, detail = kb._check("tool_error_must_name", "VendorNotConfiguredError", quiet)
+    check("no tool failure at all reports undecidable", verdict is None, detail)
+
+    named = facts(
+        events=[
+            {"kind": "tool_error", "error": "VendorNotConfiguredError: finnhub key missing"}
+        ]
+    )
+    verdict, detail = kb._check("tool_error_must_name", "VendorNotConfiguredError", named)
+    check("a failure carrying the name passes", verdict is True, detail)
+
+    anonymous = facts(events=[{"kind": "tool_error", "error": "RuntimeError: boom"}])
+    verdict, detail = kb._check("tool_error_must_name", "VendorNotConfiguredError", anonymous)
+    check("a failure that hides the name is caught", verdict is False, detail)
+
+
 def undecidable_are_not_passes() -> None:
     """A check that cannot be evaluated must never be recorded as satisfied."""
 
@@ -338,6 +392,24 @@ def evaluate_routes_verdicts() -> None:
         "an undecidable check gives insufficient_evidence",
         gap["verdict"] == "insufficient_evidence",
         str(gap["verdict"]),
+    )
+
+    # cases.json keeps prose next to the checks. neg-04's data_row_detection_note
+    # is documentation; counting it as undecidable dragged an otherwise clean
+    # case down to insufficient_evidence.
+    noted = kb.evaluate(
+        facts(decision="a decision"),
+        {
+            "checks": {
+                "status_is": "completed",
+                "data_row_detection_note": "Only count lines that start with a date.",
+            }
+        },
+    )
+    check(
+        "a *_note entry is recorded as a note, not judged",
+        noted["verdict"] == "pass" and len(noted["notes"]) == 1 and not noted["undecidable"],
+        f"verdict={noted['verdict']} notes={len(noted['notes'])} gaps={len(noted['undecidable'])}",
     )
 
 
@@ -404,6 +476,8 @@ def main(argv: list[str] | None = None) -> int:
     lookahead_checks()
     grounding_checks()
     structural_checks()
+    identity_checks()
+    unexercised_hazards()
     undecidable_are_not_passes()
     evaluate_routes_verdicts()
 

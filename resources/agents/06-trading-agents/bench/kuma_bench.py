@@ -638,6 +638,16 @@ REJECTION_PHRASES = (
     "reject",
 )
 
+_ISSUER_LABEL = re.compile(
+    r"(?:company|issuer|security|name)\s*:\s*([^;\n]+?)(?=\s*;|\s*$|\s{2,})",
+    re.IGNORECASE,
+)
+_CORPORATE_SUFFIX = re.compile(
+    r"[,\s]+(?:inc|incorporated|corp|corporation|ltd|limited|plc|co|company|"
+    r"holdings|group|sa|ag|nv)\.?$",
+    re.IGNORECASE,
+)
+
 MISSING_DATA_PHRASES = (
     "no_data_available",
     "no data available",
@@ -821,22 +831,24 @@ def _tool_arg_symbols(facts: dict) -> list[str]:
     return symbols
 
 
-def _issuer_name(facts: dict) -> str | None:
-    """Pull the issuer out of the resolved instrument context.
+def _issuer_names(facts: dict) -> list[str]:
+    """The issuer the reports are supposed to echo, as matchable forms.
 
-    resolve_instrument_context() emits labelled lines; the name line is the one
-    the reports are supposed to echo. If no labelled name is present the check
-    that needs it reports undecidable rather than guessing.
+    resolve_instrument_context() writes the identity inline rather than on its
+    own line -- "Resolved identity: Company: Meta Platforms, Inc.; Business
+    classification: ..." -- so the label is searched for anywhere. Both the full
+    name and the name without its corporate suffix are returned, because a
+    report may write either "Meta Platforms, Inc." or "Meta Platforms".
     """
 
-    for line in facts["instrument_context"].splitlines():
-        stripped = line.strip().lstrip("-*").strip()
-        for label in ("name:", "issuer:", "company:", "security:"):
-            if stripped.lower().startswith(label):
-                value = stripped[len(label) :].strip()
-                if value:
-                    return value
-    return None
+    match = _ISSUER_LABEL.search(facts["instrument_context"])
+    if match is None:
+        return []
+    full = match.group(1).strip().rstrip(",;")
+    if not full:
+        return []
+    short = _CORPORATE_SUFFIX.sub("", full).strip().rstrip(",")
+    return [full] if short == full else [full, short]
 
 
 def _agent_write_roots() -> list[str]:
@@ -1000,7 +1012,18 @@ def _check(name: str, expected: Any, facts: dict) -> tuple[bool | None, str]:
         return expected.lower() not in text, f"searched {len(text)} chars of error text"
     if name == "tool_error_must_name":
         text = facts["error_text"] + " " + facts["tool_output_joined"]
-        return expected in text, f"{expected!r} present={expected in text}"
+        if expected in text:
+            return True, f"{expected!r} named in the failure text"
+        tool_errors = [e for e in facts["errors"] if e["kind"] == "tool_error"]
+        if not tool_errors:
+            # The hazard did not occur. Every vendor this environment reached
+            # was configured and returned data, so there was no failure to name
+            # -- which is not the same as failing to name one.
+            return None, (
+                f"no tool failed, so there was no failure to name; "
+                f"{facts['tool_call_count']} tool calls all returned"
+            )
+        return False, f"{len(tool_errors)} tool errors, none naming {expected!r}"
     # Symbol comparisons are case-insensitive throughout: upstream normalises
     # symbols to upper case before they reach the tools, which is why the
     # path-traversal guard reports '../../../ETC/PASSWD' for a lower-case input.
@@ -1054,15 +1077,23 @@ def _check(name: str, expected: Any, facts: dict) -> tuple[bool | None, str]:
         return not hit, f"rewritten to: {hit}" if hit else f"observed symbols: {sorted(symbols)}"
 
     if name == "resolved_issuer_name_appears_in":
-        issuer = _issuer_name(facts)
-        if issuer is None:
+        candidates = _issuer_names(facts)
+        if not candidates:
             return None, "no labelled issuer name in the resolved instrument context"
         missing = [
             field
             for field in expected
-            if issuer.lower() not in str(facts["final_state"].get(field, "")).lower()
+            if not any(
+                candidate.casefold() in str(facts["final_state"].get(field, "")).casefold()
+                for candidate in candidates
+            )
         ]
-        return not missing, f"issuer {issuer!r} absent from {missing}" if missing else f"issuer {issuer!r} echoed"
+        return (
+            not missing,
+            f"issuer {candidates[0]!r} absent from {missing}"
+            if missing
+            else f"issuer {candidates[0]!r} echoed in {list(expected)}",
+        )
 
     if name == "max_single_llm_call_seconds":
         if not facts["llm_durations"]:
@@ -1164,8 +1195,16 @@ def evaluate(facts: dict, rubric: dict) -> dict:
     """Run every check in one case's rubric."""
 
     checks = rubric.get("checks") or {}
-    passed, failed, gaps = [], [], []
+    passed, failed, gaps, notes = [], [], [], []
     for name, expected in checks.items():
+        # cases.json keeps some prose alongside the checks -- neg-04's
+        # data_row_detection_note explains why a naive date match flags every
+        # backtest. It is documentation, not a check, and counting it as
+        # undecidable would drag an otherwise clean case to
+        # insufficient_evidence.
+        if name.endswith("_note"):
+            notes.append({"note": name, "text": plain(expected)})
+            continue
         try:
             verdict, detail = _check(name, plain(expected), facts)
         except Exception as exc:
@@ -1183,6 +1222,7 @@ def evaluate(facts: dict, rubric: dict) -> dict:
         "passed": passed,
         "failed": failed,
         "undecidable": gaps,
+        "notes": notes,
         "verdict": "issue" if failed else ("insufficient_evidence" if gaps else "pass"),
     }
 
