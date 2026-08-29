@@ -284,3 +284,95 @@ Provider 实现者的契约陷阱**，而文档未声明返回的是 mappingprox
 
 自定义 Judge 能读到 41 万字符；官方路径拿到 779 字符,全是摘要。
 这坐实了第四节的判断：**不是判得不准，是根本看不到内容**。
+
+---
+
+## 六、合成数据直打官方 API：官方 SDK 能否正常使用（`official_sdk_probe.py`）
+
+**agent 完全剥离。** 每一条 submission 都是脚本里写死的合成文本，极性刻意做得毫不含糊：
+正例是一份完整的分析结论，反例是一句明确的拒绝。Judge 只要能看到任何一点内容，
+区分二者都是平凡的。所以这里出现 `insufficient_evidence` 只能是证据通道的性质，
+与被测 agent 无关。六个变体各用独立容器（避开 Run 锁）。
+
+| 变体 | 官方 Case | track_files | 改文件 | logs | 提交内容 | 提交状态 | 判定 |
+|---|---|---|---|---|---|---|---|
+| custom-nofiles | 否 | 否 | 否 | 是 | 正常 | completed | `insufficient_evidence` |
+| custom-files | 否 | 是 + upload_diff | **是** | 是 | 正常 | completed | `insufficient_evidence` |
+| no-logs | 否 | 否 | 否 | 否 | 正常 | completed | `insufficient_evidence` |
+| official-full | **是** | 是 + upload_diff | 是 | 是 | 正常 | completed | **`pass`** |
+| official-refuse | **是** | 是 + upload_diff | 是 | 是 | **公开声明未执行** | completed | **`pass`** |
+| official-failed | **是** | 是 + upload_diff | 是 | 是 | **公开声明未执行** | **failed** | **`pass`** |
+
+**判定只由一个变量决定：Case 是否来自后端。** 提交的内容、是否改文件、是否带日志、
+甚至 submission 状态是 completed 还是 failed，都不改变结果。
+
+### 混合路径（自定义 Case + 官方 Judge）：结构性不可用，但失败得很诚实
+
+三个变体全部 `insufficient_evidence`，后端的措辞逐次更明确：
+
+> contains only artifact metadata (paths, sha256 hashes, sizes) but **no log content**.
+> The only response claims are completion statuses, **which are not proof of response text**.
+
+`custom-files` 是关键对照：`track_files=True` + `upload_diff=True` + 真实改了两个文件，
+后端仍然说 "the actual text content of pos-answer.md, neg-refuse.md ... is not provided"。
+**这推翻了"KUMA 至少对改文件的 agent 可用"的假设** —— file_change 组件同样只有
+`path + operation + before/after_sha256`。
+
+`upload_diff=True` 名不副实：`diff.py:139` 产出的 `text_diff` 进的是
+`local_diffs`，而 `tracking/evidence.py:262` 只把它写进**本地** record 文件并做敏感扫描，
+`PreparedEvidence` 根本不带它。**这个开关不上传任何东西。**
+
+### 完全官方路径：看起来能用，实际是空判——这更危险
+
+`official-refuse` 的每一步提交都是：
+
+> I refused to perform this step. I did not read the requirement, did not run any
+> test, and changed nothing on purpose. There is no result here.
+
+判定 `pass`，confidence high，4/4 step `passed`，0 issues。
+
+`official-failed` 更进一步：四步全部 `status="failed"` + `error="step not performed"`。
+`official_judge.py:385` 的 `_submission_status` 确实把聚合状态 `"failed"` 发了上去
+（它是 metadata 里少数真实传输的字段之一），后端**依然**返回 `pass`。
+
+**在官方 Case 路径上，Judge 的判定与 SDK 送出的任何 submission 信息都无关。**
+
+### 为什么两条路径行为不同
+
+`api.py:64-73`：
+
+```python
+can_negotiate = bool(official_case and official_judge and evidence_capabilities)
+...
+if not can_negotiate:
+    evidence_capabilities = ()
+```
+
+证据能力协商**要求同时是官方 Case 和官方 Judge**。混合路径下 `official_case=False`，
+协商被整个跳过，Case 不声明任何可观测证据种类，后端 Judge 于是回退到要正文——
+而 SDK 永远不送正文，死锁。走完全官方路径时协商成立，后端按声明的能力生成 Case，
+但它能拿到的仍只有哈希，于是"验证"退化成放行。
+
+**一条失败得很响，一条失败得无声。都不可用。**
+
+### 证据词表里有四种类型无人能声明
+
+`runtime_contract.py:14` 的 `CASEGEN_EVIDENCE_CAPABILITY_ORDER` 有七种：
+
+```
+file_change, tool_call, command_result, test_result, state_transition,
+artifact_snapshot, agent_response_claim
+```
+
+而 `derive_casegen_evidence_capabilities`（同文件 95 行）只可能声明其中三种：
+`file_change`（需 track_files）、`artifact_snapshot`（需 trace_evidence）、
+`agent_response_claim`。**`tool_call`、`command_result`、`test_result`、
+`state_transition` 定义在词表里，但没有任何代码路径能声明或产出它们。**
+
+`tool_call` 恰恰是本项目 trace 抓得最全的一类（10 条 case 共 98 次工具调用，
+参数与完整输出俱在）。SDK 有词汇，没有采集与传输的实现。
+
+### 本轮消耗
+
+6 次 Run：casegen 9→12，judge 7→13，credits 99,984→99,975（9 credits）。
+上传到 `defuzex.ai` 的全部是本文件内写死的合成文本，不含任何真实数据。
