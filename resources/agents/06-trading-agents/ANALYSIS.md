@@ -48,11 +48,25 @@ START → [Market → Sentiment → News → Fundamentals]   四个分析师串�
 | `news` | `get_news`、`get_global_news`、`get_insider_transactions`、`get_macro_indicators`、`get_prediction_markets` |
 | `fundamentals` | `get_fundamentals`、`get_balance_sheet`、`get_cashflow`、`get_income_statement` |
 
-**关键结构**：除 `get_verified_market_snapshot` 外，所有工具体都是一行 —— `return route_to_vendor("<method>", *args)`（见 `agents/utils/core_stock_tools.py` 等）。也就是说：
+**关键结构**：12 个工具里有 **11 个**的函数体就是一行 —— `return route_to_vendor("<method>", *args)`（`get_indicators` 是在循环里对每个指标各调一次，本质相同）。也就是说：
 
-> **所有外部数据出口收敛到 `tradingagents/dataflows/interface.py:route_to_vendor()` 这一个函数。**
+> **绝大部分外部数据出口收敛到 `tradingagents/dataflows/interface.py:route_to_vendor()` 这一个函数。**
 
-这是整个方案里最有价值的一点：屏蔽付费 vendor、注入确定性 mock、录制/回放，全都只需要在这一个点上做，而且不用碰工具定义 —— agent 的**原生工具调用行为完全保留**（LLM 照样自己决定调哪个工具、传什么参数）。
+这是整个方案里最有价值的一点：屏蔽付费 vendor、注入确定性 mock、录制/回放，主要只需要在这一个点上做，而且不用碰工具定义 —— agent 的**原生工具调用行为完全保留**（LLM 照样自己决定调哪个工具、传什么参数）。
+
+**但有一个例外，务必注意**：`get_verified_market_snapshot` **绕过了 vendor 路由**。它的调用链是
+
+```
+get_verified_market_snapshot                       (market_data_validation_tools.py:23)
+  → build_verified_market_snapshot                 (dataflows/market_data_validator.py:62)
+    → _verified_rows                               (market_data_validator.py:28)
+      → load_ohlcv                                 (dataflows/stockstats_utils.py:148)
+        → yf.download(...)                         (stockstats_utils.py:195)  ← 直连 yfinance
+```
+
+它**硬编码走 yfinance**，不看 `data_vendors` 配置，并且自带一套「5 年窗口、按 symbol 一个文件」的独立缓存。这是有意为之 —— 它是给分析师提示词用的「地面真值校验快照」，设计上就不该被 vendor 配置左右（`trading_graph.py:197-200` 的注释说明它必须可执行，否则模型会报告数据"unavailable"）。
+
+**对方案的影响**：做确定性 mock 或离线回放时，**只拦 `route_to_vendor` 是不够的**，`get_verified_market_snapshot` 仍会打 Yahoo。需要两个拦截点：`route_to_vendor` 和 `load_ohlcv`（或更底层的 yfinance 层）。屏蔽付费 key 这件事不受影响，因为 yfinance 本来就无 key。
 
 ---
 
@@ -213,6 +227,8 @@ TRADINGAGENTS_CACHE_DIR=/run/case/<case_id>/cache
 ```
 
 付费 vendor 屏蔽：`config["data_vendors"]` 不写 `alpha_vantage`（默认已如此）。`get_macro_indicators` 若无 `FRED_API_KEY`，`route_to_vendor` 会抛 `VendorNotConfiguredError` 且无其他 vendor 可退 —— 两个选择：给一个免费 FRED key，或干脆不选 `news` 分析师（唯一用到 fred/polymarket 的节点）。
+
+若要做离线/确定性回放，记得同时接管 `dataflows/stockstats_utils.py:load_ohlcv`，否则 `get_verified_market_snapshot` 会绕过 vendor 路由直连 Yahoo（见第二节）。
 
 ### driver.py 的形状
 
