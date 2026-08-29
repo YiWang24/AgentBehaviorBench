@@ -176,20 +176,61 @@ final_state, signal = graph.propagate("AAPL", "2026-08-27")
 2. **一个容器同时只能有一个活跃 Run**，用 OS 文件锁强制（`runtime.py:95-120`）。→ 并行跑多个 case 必须一个 case 一个容器。
 3. **Trace Evidence 在设计上就不搬运 prompt/completion**。`evidence/trace_mapping.py` 的白名单只放行 `gen_ai.operation.name`、`gen_ai.provider.name`、`gen_ai.request.model`、`gen_ai.response.model`、`gen_ai.system`，加前缀 `gen_ai.latency.*` / `gen_ai.token.usage.*` / `gen_ai.usage.*`；黑名单 `_PRIVATE_ATTRIBUTE_TERMS` 明确拦掉 `prompt`、`completion`、`content`、`source`、`system_prompt`、`token`、`api_key`、`log.body`。
 
-**这就是你感觉到的落差**。展开说：
+上面第 3 条只适用于 **OTel Trace Evidence 这一条通道**，不能推广到整个 Evidence 模型。逐个通道读完源码后的准确版本如下。
 
-> 你要「抓到所有中间数据来优化 KUMA 内部逻辑」，但 KUMA 的 Evidence 通道按契约只会拿到**骨架**（走了哪些节点、什么模型、耗时、token 数）。四份分析师报告、多空辩论全文、12 个工具的原始返回体 —— 这些是判断 agent 行为对错的核心，却**进不了 Trace Evidence**。
+### 6.1 完整通道清单
 
-能进 KUMA 的内容通道只有三个，都有代价：
-- `submit(output=...)`：JSON-compatible，是唯一能塞全量内容的地方，但上传前会过敏感信息扫描（`repository/privacy.py`）。
-- `submit(logs=[...])`：从显式指定的文件读增量，同样过扫描。
-- `upload_diff=True`：文件文本 diff。
+| 通道 | 承载内容 | 上限（SDK 默认值） | 出处 |
+|---|---|---|---|
+| `submit(output=...)` | **任意嵌套 JSON 全文**（dict/list/str/bool/int/有限 float） | SDK 侧未见显式上限 | `contracts.py:_freeze_json` |
+| `submit(logs=[...])` | **文件增量全文**（`"content"` 字段就是 UTF-8 正文，非哈希） | 20 个文件 / 单段 10 MB / 总计 20 MB；后缀限 `.txt .log .json .jsonl .md` | `evidence/tracking/logs.py:58-73, 195-222` |
+| `Submission.extensions["runtime_evidence"]` | **仅哈希**，7 种封闭 component | 1–100 个 component，单个 EvidenceItem ≤ 120,000 字符 | `docs/runtime-evidence.md` |
+| 文件追踪 `track_files=True` | 路径 / 哈希 / 大小 / mode / 变更类型；`upload_diff=True` 才带文本 diff | 100,000 条目 / 单文件文本 1 MB / 文本总计 32 MB | `evidence/tracking/snapshot.py:83-92` |
+| OTel Trace Evidence | 骨架，白名单外全部丢弃 | 200 spans / 32 属性 / 单文本 256 字符 / 总计 512 KB | `evidence/trace.py:60-67` |
+| 返回值 `TestReport` | `status`(pass/issue/insufficient_evidence)、`confidence`、`stop_reason`、`issues[]`、**`evidence_gaps[]`** | — | `contracts.py:328` |
 
-**所以架构上必须双平面**，不能指望 KUMA 一条通道解决：
+**修正**：`logs` 通道装的是完整正文（`logs.py:220` 的 `"content": content`），总计 20 MB —— 对 TradingAgents 一次运行的全量 trace 是够用的。所以「KUMA 只能拿到骨架」这个说法只对 Trace Evidence 成立，**不成立于整个 Evidence 模型**。
 
-- **平面 1（KUMA 契约面）**：`submit(output)` 提交结构化结论 + OTel trace 提交骨架 → 这是 KUMA 官方评判的输入。
-- **平面 2（本地全保真面）**：callback handler 写 JSONL 到挂载卷 → 这是你分析、回归、优化 KUMA 内部逻辑的语料。
-- 两面用 KUMA `run_id` + input index 关联。
+因此双平面不是被契约**强制**的，而是一个可选的工程取舍：
+
+- 只用 KUMA 单平面 → `output` 放结构化结论，`logs=[trace.jsonl]` 放全量事件流。够用，且省一套设施。
+- 加本地平面 2 → 好处是不受 20 MB 上限约束、不过敏感扫描、可长期留存做回归。**建议保留**，但理由是容量与留存，不是「KUMA 收不下」。
+
+### 6.2 敏感扫描的实际口径（比预想窄）
+
+`repository/privacy.py:29-48` 只匹配 7 类具体凭证特征：PEM 私钥头、`Authorization: Bearer/Basic`、`Cookie:`、GitHub token（`ghp_`/`gho_`/…）、AWS key（`AKIA`/`ASIA`）、KUMA key（`dfx_`）、以及 `api_key|access_token|auth_token|password|secret` 后跟 16 位以上的赋值。
+
+**普通金融文本、ticker、价格数字不会触发**。第九节原先列的「敏感扫描误报率」这个未知项可以划掉。
+
+### 6.3 Runtime Evidence 的 7 种 component —— 这就是 KUMA 想知道的「agent 的哪些方面」
+
+`docs/runtime-evidence.md:54-62` 定义了封闭联合类型：
+
+| kind | 字段 |
+|---|---|
+| `file_change` | `path`、`change_type`(created/modified/deleted/unchanged)、`before_sha256`、`after_sha256`、`size_bytes` |
+| `tool_call` | `tool_name`、`outcome`(succeeded/failed/unknown)、**必填 `arguments_sha256`**、`result_sha256` |
+| `command_result` | `command_id`、`exit_code`、`stdout_sha256`、`stderr_sha256` |
+| `test_result` | `suite_id`、`outcome`(passed/failed/partial)、`passed`、`failed`、`skipped` |
+| `state_transition` | `state_id`、`outcome`、`before_sha256`、`after_sha256` |
+| `artifact_snapshot` | `artifact_id`、`path`、`sha256`、`size_bytes`、`media_type` |
+| `agent_response_claim` | `claim_id`、`claim`(completed/refused/blocked)、`text_sha256` |
+
+**关键一句在 `runtime-evidence.md:70-72`**：
+
+> "The SDK currently has no public instrumentation that proves tool calls, commands, tests, or state transitions, so it does not emit or declare those kinds."
+
+即 `tool_call`、`state_transition`、`command_result`、`test_result` **在 wire schema 里已定义，但 SDK 目前观测不到、不会发出**。当前实现只发 `agent_response_claim`，文件追踪发 `file_change`，日志/OTel 发 hash-only 的 `artifact_snapshot`。
+
+这正是 06 能补上的位置：LangChain callback 拿得到 `on_tool_start/end`（→ `tool_call`，含 `arguments_sha256` / `result_sha256`）和 `on_chain_start/end`（→ `state_transition`，对应 20 个图节点）。**这是「用 06 来优化 KUMA 内部逻辑」最直接的切入点** —— 不是给 KUMA 加新 schema，而是为已有 schema 提供第一个真实的 instrumentation 来源。
+
+### 6.4 输入侧也比预想灵活
+
+`KumaInput.payload_type` 允许 `"text"` 或 `"structured"`，后者接受 Mapping 或 sequence（`contracts.py:85-91`）。所以 `{"ticker": "AAPL", "date": "...", "analysts": [...]}` 这种多字段输入 **KUMA 本身是支持的** —— 第八节第 1 条的单键限制来自 AgentBehaviorBench 的 `input_key`/`output_key` 适配层，不是 KUMA 的约束。
+
+### 6.5 两个平面的关联键
+
+`run_id` + `input_id`（`index`）。`Submission` 三元组 `run_id`/`case_id`/`input_id` 与 runtime evidence envelope 的 `run_id`/`input_id`/`step_id`/`submission_id` 一致，本地 JSONL 用同一组键即可对齐。
 
 ---
 
@@ -282,5 +323,5 @@ KUMA 的单容器单 Run 锁决定了并行度模型 —— 外层调度器为�
 1. `langchain/langgraph` 版本对 `on_tool_end` 是否给出原始字符串返回体（版本敏感）。
 2. yfinance 在本机网络下的可达性与限流（历史上出现过 Yahoo 侧 429）。
 3. `openai_compatible` 客户端是否把 `callbacks` 正确透传（`openai_client.py:168` 的 kwargs 白名单里有 `callbacks`，看起来可以，但没实跑）。
-4. KUMA `submit(output)` 的实际体积上限 —— 源码里没有找到显式常量，可能在服务端。
-5. 敏感信息扫描器对金融文本的误报率（ticker、数字串是否会被判定为敏感）。
+4. KUMA `submit(output)` 的实际体积上限 —— SDK 侧无显式常量，可能在服务端。`logs` 通道的上限是明确的（总计 20 MB），所以大体量走 logs 更可控。
+5. ~~敏感信息扫描器对金融文本的误报率~~ —— **已排除**。`privacy.py:29-48` 只匹配 7 类具体凭证特征，普通金融文本不触发（见 6.2）。
