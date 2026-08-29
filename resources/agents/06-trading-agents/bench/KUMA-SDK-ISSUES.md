@@ -205,3 +205,82 @@ max_files: 10 | max_file_bytes: 120000 | max_total_bytes: 1200000
 这也澄清了一个此前反复的判断：`submit(logs=[...])` 在 **SDK 内部**确实持有完整正文（`tracking/logs.py:220`），但**传到官方 Judge 的**是 hash-only 信封。两句都对，但决定评判结果的是后者。
 
 修复方向：typed 与 legacy 并存上传（typed 做完整性锚点，raw_log 提供正文），或让 runtime evidence 支持带正文的 component。
+
+---
+
+## 五、自定义 Judge Provider 实测（`kuma_judge.py` / `judge_contract_probe.py` / `envelope_probe.py`）
+
+用类式 `RubricJudge` 重跑了官方 Judge 那次的**同样 3 条 case**（pos-01 / neg-06 / neg-09），
+构成严格对照。判定 1/3 通过，与本地基线一致；同样 3 条走官方 Judge 是 3/3
+`insufficient_evidence`。差别只在证据通道。
+
+### SDK 做对的地方
+
+- `adapt_judge_provider` 对任何带 `.judge()` 的对象原样透传（`providers/base.py:129`），
+  不套 `CallableJudgeProvider`。类式 Provider 是一等公民。
+- **rubric 完整穿过 Case → Run → JudgeContext**。这一轮故意不用模块全局变量，
+  改从 `context.case.rubric` 读回评分标准（报告 `extensions.rubric_source = "case.rubric"`），
+  三条 input_id 齐全。`rubric` 是 `normalize_case` 唯一豁免私有数据扫描的子树，
+  它是自定义 Judge 传递判分标准的正确通道，且确实可用。
+- `normalize_report` 这道门很扎实：30 条探针 20 条正确拒绝，覆盖私有数据扫描、
+  JSON 可序列化、run_id 绑定、confidence 值域、status 枚举。
+
+### 缺陷 5：SDK 冻结 Mapping，`isinstance(x, dict)` 静默失效
+
+`Submission.output` 的实际类型是 **`mappingproxy`**，`extensions` 同理。
+按直觉写 `isinstance(value, dict)` 的消费者会静默拿到空结果——**不抛异常、不告警**。
+本文件第一版探针就踩了两次：`output_text_chars` 报 0、信封报 `present: False`，
+而实际数据是满的。改用 `collections.abc.Mapping` 后立刻正常。
+
+这与第二节的阻断级缺陷是**同一个根因**：jsonschema 的 `"object"` 类型检查只认 `dict`，
+所以每一份冻结后的 input schema 都被拒。区别在于那次是 SDK 内部撞上，
+这次是 Provider 作者从外部撞上——**它不只是内部 bug，是 SDK 强加给每个
+Provider 实现者的契约陷阱**，而文档未声明返回的是 mappingproxy。
+
+### 缺陷 6：Judge 返回值的 issue 结构完全不校验
+
+`issues=[{"detail": "x"}]` 直接通过。官方 Judge 的 issue 带
+`issue_id`/`severity`/`message`，自定义 Judge 可返回任意字典。
+消费 `TestReport.issues` 的代码拿不到稳定形状。
+
+### 缺陷 7：七种不同错误塌成同一句话
+
+`status='banana'`、`status=42`、`confidence='banana'`、`confidence=1.5`、
+`issues=[bare string]`、`issues=[42]`、`status='passed'` —— 全部报
+`Judge Provider returned an invalid TestReport`，不指出是哪个字段。
+与第二节 "invalid input_schema" 指错方向属同一类 DX 问题。
+
+附带一处不一致：`_official_judgment.py:71` 的白名单收 `"passed"`，
+而 `TestReport.__post_init__` 只收 `"pass"`。官方路径能过的拼写，自定义路径过不了。
+
+### 缺陷 4 的最小复现（`envelope_probe.py`，一秒，无 agent、无网络）
+
+`build_runtime_evidence` 是纯函数。喂给它一个**携带真实正文**的 log 段
+（`content` 字段，与 SDK 自己放进 `Submission.logs` 的形状相同）：
+
+```
+输入 log 段:  content 2,000 字符
+输入 output:  final_trade_decision 2,000 字符
+信封总大小:   693 字符
+  component 0  kind=artifact_snapshot     字段: [artifact_id, kind, media_type, sha256, size_bytes]
+  component 1  kind=agent_response_claim  字段: [claim, claim_id, kind, text_sha256]
+信封中能否找回正文片段 'FINAL TRANSACTION PROPOSAL': False
+信封中是否含 sha256 摘要: True
+```
+
+**4,000 字符正文进，693 字符纯元数据出。**
+
+### 正文确实握在 SDK 手里——被信封丢掉，不是从未采集
+
+`Submission.logs[i]` 的字段是
+`[binary, complete, content, encoding, end_offset, path, segment_no, sha256, start_offset]`
+—— **`content` 在提交侧是有的**。三条 case 的实测对照：
+
+| case | 本地 Judge 可读正文 | `submission.logs` 正文 | 官方信封 | 带正文的组件 |
+|---|---:|---:|---:|---|
+| pos-01-us-largecap | 20,633 | 413,728 | **779** | 无 |
+| neg-06-invalid-ticker | 1,024 | 17,048 | **785** | 无 |
+| neg-09-empty-ticker | 24,991 | 387,897 | **782** | 无 |
+
+自定义 Judge 能读到 41 万字符；官方路径拿到 779 字符,全是摘要。
+这坐实了第四节的判断：**不是判得不准，是根本看不到内容**。

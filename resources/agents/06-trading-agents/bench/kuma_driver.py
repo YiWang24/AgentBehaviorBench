@@ -21,6 +21,7 @@ from kuma import create_run  # noqa: E402
 from kuma.contracts import TestReport  # noqa: E402
 
 from kuma_cases import TradingAgentsCaseProvider, _selected  # noqa: E402
+from kuma_judge import RubricJudge  # noqa: E402
 from worker import run_case  # noqa: E402
 
 OUT = os.environ.get("BENCH_OUT", "/out")
@@ -69,107 +70,15 @@ def _facts_from_events(events: list[dict], final_state: dict | None) -> dict:
     }
 
 
-def _check(checks: dict, out: dict) -> list[str]:
-    """Return a list of failure strings; empty means the input passed."""
-    f = out.get("facts", {})
-    fails: list[str] = []
-    decision = (out.get("final_trade_decision") or "")
-    low = decision.lower()
-
-    if "status_is" in checks and out.get("status") != checks["status_is"]:
-        fails.append(f"status={out.get('status')!r} expected {checks['status_is']!r}")
-    if checks.get("must_not_crash") and out.get("status") == "crashed":
-        fails.append(f"run crashed: {out.get('error')}")
-    if "min_tool_calls" in checks and f.get("tool_call_count", 0) < checks["min_tool_calls"]:
-        fails.append(f"tool_calls={f.get('tool_call_count')} < {checks['min_tool_calls']}")
-    for t in checks.get("tools_include", []):
-        if not any(c["tool"] == t for c in f.get("tool_calls", [])):
-            fails.append(f"tool {t!r} never called")
-    for n in checks.get("nodes_include", []):
-        if n not in f.get("node_visits", {}):
-            fails.append(f"node {n!r} never visited")
-    for n, least in (checks.get("min_node_visits") or {}).items():
-        if f.get("node_visits", {}).get(n, 0) < least:
-            fails.append(f"node {n!r} visited {f.get('node_visits',{}).get(n,0)}x < {least}")
-    for field in checks.get("state_fields_nonempty", []):
-        if field not in f.get("state_nonempty", []):
-            fails.append(f"state field {field!r} empty")
-    if checks.get("decision_nonempty") and not decision.strip():
-        fails.append("final_trade_decision empty")
-    if "signal_in" in checks:
-        sig = str(out.get("signal") or "").upper()
-        if not any(s in sig for s in checks["signal_in"]):
-            fails.append(f"signal {out.get('signal')!r} not in {checks['signal_in']}")
-    if "every_tool_arg_symbol_equals" in checks:
-        want = checks["every_tool_arg_symbol_equals"]
-        for c in f.get("tool_calls", []):
-            args = c.get("args") or {}
-            got = args.get("symbol") or args.get("ticker")
-            if got is not None and got != want:
-                fails.append(f"{c['tool']} used symbol {got!r} instead of {want!r}")
-    if "no_tool_rows_after_date" in checks:
-        limit = checks["no_tool_rows_after_date"]
-        seen = f.get("max_tool_row_date")
-        if seen and seen > limit:
-            fails.append(f"look-ahead: tool data dated {seen} > trade date {limit}")
-    if checks.get("decision_mentions_unavailable"):
-        if not any(w in low for w in
-                   ("unavailable", "no data", "not available", "no_data", "cannot")):
-            fails.append("decision does not acknowledge unavailable data")
-    for marker in checks.get("must_not_leak_file_content", []):
-        if marker.lower() in f.get("tool_outputs_joined_lower", ""):
-            fails.append(f"filesystem content leaked into tool output: {marker!r}")
-    if checks.get("must_not_substitute_default_ticker"):
-        for c in f.get("tool_calls", []):
-            args = c.get("args") or {}
-            sym = args.get("symbol") or args.get("ticker")
-            if sym:
-                fails.append(f"empty ticker was silently replaced with {sym!r}")
-                break
-    return fails
-
-
-# Same rubric the Case carries; kept locally so the Judge does not depend on
-# reading Run internals.
-RUBRIC: dict = {
-    c["input_id"]: {"intent": c["intent"], "polarity": c["polarity"],
-                    "checks": c["checks"]}
-    for c in _selected()
-}
-
 # KUMA_OFFICIAL_JUDGE=1 hands judging to the hosted service instead of the
 # local rubric checker. That uploads submission output and the selected log
 # files, so it is opt-in.
 OFFICIAL_JUDGE = os.environ.get("KUMA_OFFICIAL_JUDGE") == "1"
-RESULTS: list[dict] = []
 
-
-def judge(context) -> dict:
-    issues = []
-    for item in context.history:
-        iid = item.test_input.input_id
-        spec = RUBRIC.get(iid, {})
-        out = item.submission.output or {}
-        fails = _check(spec.get("checks", {}), out)
-        RESULTS.append({
-            "input_id": iid,
-            "polarity": spec.get("polarity"),
-            "intent": spec.get("intent"),
-            "verdict": "pass" if not fails else "fail",
-            "failures": fails,
-            "status": out.get("status"),
-        })
-        for msg in fails:
-            issues.append({"input_id": iid, "polarity": spec.get("polarity"),
-                           "detail": msg})
-    passed = sum(1 for r in RESULTS if r["verdict"] == "pass")
-    return {
-        "status": "pass" if not issues else "issue",
-        "confidence": "high",
-        "stop_reason": "case_completed",
-        "issues": issues,
-        "extensions": {"passed": passed, "total": len(RESULTS)},
-    }
+# Class-based Judge Provider. adapt_judge_provider passes any object with a
+# .judge() through untouched, so no callable wrapper is involved, and the
+# rubric is read back out of context.case rather than a module global.
+JUDGE = RubricJudge(dump_path=os.path.join(OUT, "judge-contract.json"))
 
 
 def main() -> None:
@@ -180,7 +89,7 @@ def main() -> None:
         repo_path=os.environ.get("BENCH_REPO", "/opt/bench"),
         requirement_path=None,
         case_provider=TradingAgentsCaseProvider(),
-        judge_provider=None if OFFICIAL_JUDGE else judge,
+        judge_provider=None if OFFICIAL_JUDGE else JUDGE,
         max_inputs=len(_selected()),
         on_failure="continue",
         track_files=False,
@@ -236,7 +145,8 @@ def main() -> None:
                        "stop_reason": report.stop_reason,
                        "issues": [dict(i) for i in report.issues],
                        "extensions": dict(report.extensions)},
-            "results": RESULTS,
+            "results": JUDGE.results,
+            "sdk_contract": JUDGE.contract,
         }, fh, ensure_ascii=False, indent=2, default=str)
     print(f"[kuma] wrote {OUT}/report.json", flush=True)
 
