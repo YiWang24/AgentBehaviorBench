@@ -376,3 +376,87 @@ artifact_snapshot, agent_response_claim
 
 6 次 Run：casegen 9→12，judge 7→13，credits 99,984→99,975（9 credits）。
 上传到 `defuzex.ai` 的全部是本文件内写死的合成文本，不含任何真实数据。
+
+---
+
+## 七、用官方自己的样例测试（`examples/single_agent_template`）
+
+SDK 仓库自带三个示例，其中 `single_agent_template` 是官方的标准模板，
+README 有专门一节 "Official Case and Judge"，说明如何用 `KUMA_USE_OFFICIAL=1`
+接官方 Case 与官方 Judge。它自带的 `call_your_agent` 是个空桩，只回显输入。
+
+### 本地 quickstart：正常
+
+按 README 跑默认路径，输出与文档逐字一致：
+
+```
+run_state=completed
+history_items=1
+last_submission_status=completed
+report=None
+result_link=None
+```
+
+模板本身没问题。（`report=None` 也不是缺陷：`submit()` 在最后一条输入时会自动触发
+judge，而本地路径 `judge=False`。）
+
+### 官方模式：开箱即 `insufficient_evidence`
+
+```
+KUMA_USE_OFFICIAL=1  KUMA_API_KEY=…  KUMA_REPO_PATH=/tmp/official-repo
+```
+
+```
+run_state=report_ready
+history_items=4
+last_submission_status=completed
+status='insufficient_evidence'  confidence='low'
+step_results: step-1..4 全部 insufficient_evidence
+flags: {'runtime_evidence': False}
+```
+
+**官方自己的模板，按官方 README 跑官方模式，用官方 Case 和官方 Judge，
+四步全部判不出来。** 这不需要任何自定义代码就能复现。
+
+### 判定的真正决定因素：`submit(logs=...)` 传没传
+
+`flags: {'runtime_evidence': False}` 是新线索。模板与第六节 `official-full` 的
+差异有四处，逐一隔离后只剩一个变量：
+
+| 变体 | logs= | 改文件 | 提交内容 | 提交状态 | 判定 |
+|---|---|---|---|---|---|
+| official-full | **是** | 是 | 正常 | completed | `pass` |
+| official-refuse | **是** | 是 | 公开声明未执行 | completed | `pass` |
+| official-failed | **是** | 是 | 公开声明未执行 | failed | `pass` |
+| official-nofiles | **是** | 否 | 正常 | completed | `pass` |
+| official-nologs | **否** | 否 | 正常 | completed | `insufficient_evidence` |
+| 官方模板 | **否** | 否 | 空桩回显 | completed | `insufficient_evidence` |
+
+`official-nofiles` 与 `official-nologs` 是严格单变量对照——配置完全相同，
+只差 `submit()` 有没有传 `logs=`。前者 pass，后者 insufficient_evidence。
+
+而 `_log_components`（`evidence/runtime.py:137`）只把日志变成
+`artifact_snapshot` 的 `sha256 + size_bytes + path`，**内容从不上传**。
+
+**所以官方路径的判定规则实际是：`submit()` 传了任意一个文件给 `logs=` 就 `pass`，
+不传就 `insufficient_evidence`。文件里写什么、agent 做了什么、状态是
+completed 还是 failed，全都不参与判定。**
+
+我先猜决定因素是"有没有文件改动"，被 `official-nofiles` 证伪；
+再隔离到 `logs=`，被 `official-nologs` 证实。两次都是单变量对照。
+
+### 这对第六节结论的修正
+
+第六节说"官方 Case 路径永远 pass"是不准确的——它的四个变体恰好都传了 `logs=`。
+准确的说法是：**官方路径的判定与 agent 行为无关，只与是否附带了一个
+日志文件有关**。一个什么都不做的 agent，只要 `submit(logs=[任意文件])`，
+就能拿到 `pass` + confidence high + 4/4 step passed。
+
+两种失败模式因此是同一个缺陷的两面：
+证据信封里除了 `agent_response_claim` 之外一个组件都没有时，后端置
+`runtime_evidence: False` 并拒判；有任意一个 `artifact_snapshot` 时就放行，
+而它看不到那个 snapshot 的内容。
+
+### 本节消耗
+
+官方模板 1 次 + 隔离实验 2 次。累计 credits 99,984 → 99,969。

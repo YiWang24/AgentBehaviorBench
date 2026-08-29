@@ -102,6 +102,14 @@ VARIANTS = {
     # Same again, but every submission is reported as an outright failure.
     # Distinguishes "rubber-stamps completed" from "rubber-stamps anything".
     "official-failed": (True,  True,  True,  True,  True,  True),
+    # Isolates the file mutation: identical to official-full except that the
+    # repository is left untouched. If this flips the verdict, the Judge is
+    # deciding on whether any file changed, not on what the change contains.
+    "official-nofiles": (True, True,  True,  False, True,  False),
+    # Single-variable difference from official-nofiles: no logs= on submit.
+    # This is the only thing that separates the passing probe from the
+    # official template's own insufficient_evidence.
+    "official-nologs":  (True, True,  True,  False, False, False),
 }
 # Variants whose submissions carry status="failed" instead of "completed".
 FAILED_STATUS = {"official-failed"}
