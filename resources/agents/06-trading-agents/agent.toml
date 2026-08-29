@@ -1,0 +1,66 @@
+schema_version = "defuzex-bench.agent.v2"
+agent_id = "trading-agents"
+display_name = "TradingAgents (TauricResearch)"
+framework = "langgraph"
+
+[source]
+url = "https://github.com/TauricResearch/TradingAgents"
+revision = "a33fd4c0f134485a43553a2c23a63cb14adbd88f"
+license = "Apache-2.0"
+
+[build]
+# The KUMA layer needs the SDK source, which lives outside this directory and
+# so cannot be COPYed from this context. kuma_bench.py stages a build context
+# holding this Dockerfile plus a copy of the SDK, and builds that instead.
+# Nothing under TradingAgents/ is modified either way.
+context = "."
+dockerfile = "Dockerfile"
+
+[launch]
+# This is the ABB-native entry: kuma_bench.py with no arguments is a JSONL
+# worker on stdin/stdout. `kuma_bench.py --in-container --case <id>` is the
+# other in-container role and is what the KUMA runner invokes, because KUMA
+# refuses to run unless the SDK shares the container with the agent.
+argv = ["python", "/opt/bench/kuma_bench.py"]
+input_mode = "jsonl"
+output_format = "jsonl"
+workdir = "/opt/agent"
+
+[runtime]
+type = "docker"
+# Measured end to end: pos-01 took 787s with a single analyst and
+# deep_think on deepseek-v4-pro. The schema default of 60 is off by more
+# than an order of magnitude for this agent.
+timeout_sec = 1800
+env_keys = [
+  # Model credentials and selection. Deliberately not in secret_env_keys:
+  # `--list` and the official-path checks must work without a model key, and
+  # kuma_bench.py reports a missing key with a more useful message than
+  # MissingSecretError does.
+  "DEEPSEEK_API_KEY",
+  "OPENROUTER_API_KEY",
+  "TRADINGAGENTS_LLM_PROVIDER",
+  "TRADINGAGENTS_QUICK_THINK_LLM",
+  "TRADINGAGENTS_DEEP_THINK_LLM",
+  "TRADINGAGENTS_TEMPERATURE",
+  # The ABB policy runs the container with --read-only; TradingAgents writes
+  # cache, results and its memory log under ~/.tradingagents. Redirect all
+  # three into the policy's tmpfs so no source change is needed.
+  "TRADINGAGENTS_CACHE_DIR",
+  "TRADINGAGENTS_RESULTS_DIR",
+  "TRADINGAGENTS_MEMORY_LOG_PATH",
+  # Read by the SDK itself (kuma/config.py:214). The repository .env stores
+  # the same dfx_ key under DEFUZEX_API_KEY; kuma_bench.py bridges the names.
+  "KUMA_API_KEY",
+  "KUMA_BASE_URL",
+]
+secret_env_keys = []
+
+# No [llm_interception] block: upstream supports openai_compatible plus
+# TRADINGAGENTS_LLM_BACKEND_URL natively, which is a supported redirect and
+# does not need the TLS MITM path. The image does run as a non-root user
+# (USER appuser), so that path remains available if it is wanted later.
+
+[adapter]
+type = "jsonl"
+mode = "container"
