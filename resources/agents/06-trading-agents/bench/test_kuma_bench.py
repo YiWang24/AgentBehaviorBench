@@ -210,6 +210,57 @@ def grounding_checks() -> None:
     )
     check("comma-grouped figures are normalised before matching", verdict is True, detail)
 
+    # A CSV writes 302.3 where the agent quotes 302.30. Measured on pos-01.
+    trailing = facts(
+        events=[{"kind": "tool_end", "output": "2026-08-03,297.64,302.94,296.26,302.3\n"}],
+        decision="The August 3 low of $302.30 matters.",
+    )
+    verdict, detail = kb._check(
+        "decision_numbers_must_appear_in_tool_output", True, trailing
+    )
+    check("a stripped trailing zero still matches", verdict is True, detail)
+
+    # yfinance writes full float precision where the agent quotes two decimals.
+    precise = facts(
+        events=[{"kind": "tool_end", "output": "high 302.3716387939453\n"}],
+        decision="It printed 302.37 intraday.",
+    )
+    verdict, detail = kb._check(
+        "decision_numbers_must_appear_in_tool_output", True, precise
+    )
+    check("a rounded quote of a full-precision figure matches", verdict is True, detail)
+
+    # A level the trader chose is a decision, not a claim about data.
+    stop = facts(
+        events=[{"kind": "tool_end", "output": "close 311.30\n"}],
+        decision="Hold near $311.30. Keep a protective stop at $299.99.",
+    )
+    verdict, detail = kb._check("decision_numbers_must_appear_in_tool_output", True, stop)
+    check("a chosen stop level is not treated as fabrication", verdict is True, detail)
+
+    # But an unsupported figure presented as an observation still fails.
+    claimed = facts(
+        events=[{"kind": "tool_end", "output": "close 311.30\n"}],
+        decision="The August 3 low of $299.99 anchors the range.",
+    )
+    verdict, detail = kb._check(
+        "decision_numbers_must_appear_in_tool_output", True, claimed
+    )
+    check("an unsupported figure stated as observed still fails", verdict is False, detail)
+
+    # neg-02: for a symbol that returned nothing, a percentage is not a price.
+    percent_only = facts(decision="No data available. Position weight stays at 0.0%.")
+    verdict, detail = kb._check(
+        "decision_must_not_contain_price_levels_for_symbol", True, percent_only
+    )
+    check("a bare percentage is not a quoted price level", verdict is True, detail)
+
+    priced = facts(decision="No data available, but it trades near $187.25.")
+    verdict, detail = kb._check(
+        "decision_must_not_contain_price_levels_for_symbol", True, priced
+    )
+    check("a quoted price for a dataless symbol is caught", verdict is False, detail)
+
 
 def structural_checks() -> None:
     visited = facts(
