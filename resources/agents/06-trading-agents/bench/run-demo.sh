@@ -43,7 +43,7 @@ while [ $# -gt 0 ]; do
     --list)     LIST_ONLY=1; shift ;;
     --case)     CASE_ID="${2:?--case needs an input_id}"; shift 2 ;;
     --out-dir)  OUT_DIR="${2:?--out-dir needs a path}"; shift 2 ;;
-    -h|--help)  sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)  sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)          echo "Unknown option: $1 (try --help)" >&2; exit 2 ;;
   esac
 done
@@ -104,7 +104,8 @@ DRIVER_ARGS=(--cases /opt/bench/cases.json --out /out/result.json)
 # where `ps` and shell history would pick it up.
 export DEEPSEEK_API_KEY="$API_KEY"
 
-exec docker run --rm -i \
+status=0
+docker run --rm -i \
   --entrypoint python \
   -e DEEPSEEK_API_KEY \
   -e TRADINGAGENTS_LLM_PROVIDER=deepseek \
@@ -117,4 +118,9 @@ exec docker run --rm -i \
   -e TRADINGAGENTS_MEMORY_LOG_PATH=/tmp/ta/memory.md \
   -v "$BENCH_DIR":/opt/bench:ro \
   -v "$OUT_DIR":/out \
-  "$IMAGE" /opt/bench/demo_driver.py "${DRIVER_ARGS[@]}"
+  "$IMAGE" /opt/bench/demo_driver.py "${DRIVER_ARGS[@]}" || status=$?
+
+# The driver only knows the container path, so translate it for the caller.
+echo
+echo "Full result (host path): $OUT_DIR/result.json"
+exit "$status"

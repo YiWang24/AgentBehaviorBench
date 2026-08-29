@@ -172,7 +172,9 @@ def main() -> int:
     _say(f"  debate rounds     {cfg['max_debate_rounds']}  (risk: {cfg['max_risk_discuss_rounds']})")
     _say(f"  quick-think LLM   {cfg['llm_provider']} / {cfg['quick_think_llm']}")
     _say(f"  deep-think LLM    {cfg['llm_provider']} / {cfg['deep_think_llm']}")
-    _say(f"\n{DIM}A single-analyst run is roughly 11 model calls and 6-8 minutes.{RESET}")
+    # Measured on this repo: 392s and 787s for the same single-analyst case on
+    # different days. The spread is provider latency, not the graph.
+    _say(f"\n{DIM}A single-analyst run is ~11 model calls and takes 7-14 minutes.{RESET}")
 
     _section("LIVE  what the agent is doing")
 
