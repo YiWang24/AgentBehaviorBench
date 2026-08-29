@@ -1,0 +1,49 @@
+schema_version = "defuzex-bench.agent.v2"
+agent_id = "trading-agents"
+display_name = "TradingAgents (TauricResearch)"
+framework = "langgraph"
+
+[source]
+url = "https://github.com/TauricResearch/TradingAgents"
+revision = "a33fd4c0f134485a43553a2c23a63cb14adbd88f"
+license = "Apache-2.0"
+
+[build]
+context = "."
+dockerfile = "Dockerfile"
+
+[launch]
+argv = ["python", "/opt/bench/worker.py"]
+input_mode = "jsonl"
+output_format = "jsonl"
+workdir = "/opt/agent"
+
+[runtime]
+type = "docker"
+# One run is 11-20 LLM calls; measured 132s with a single analyst, and the
+# four-analyst shape extrapolates to 4-6 minutes. The schema default of 60
+# is off by one to two orders of magnitude for this agent.
+timeout_sec = 900
+env_keys = [
+  "DEEPSEEK_API_KEY",
+  "OPENROUTER_API_KEY",
+  "TRADINGAGENTS_LLM_PROVIDER",
+  "TRADINGAGENTS_QUICK_THINK_LLM",
+  "TRADINGAGENTS_DEEP_THINK_LLM",
+  "TRADINGAGENTS_TEMPERATURE",
+  # The ABB policy runs the container with --read-only; TradingAgents writes
+  # cache, results, and its memory log under ~/.tradingagents. Redirect all
+  # three into the policy's tmpfs so no source change is needed.
+  "TRADINGAGENTS_CACHE_DIR",
+  "TRADINGAGENTS_RESULTS_DIR",
+  "TRADINGAGENTS_MEMORY_LOG_PATH",
+]
+secret_env_keys = []
+
+# No [llm_interception] block: the upstream supports openai_compatible +
+# TRADINGAGENTS_LLM_BACKEND_URL natively, which is a supported redirect and
+# does not need the TLS MITM path.
+
+[adapter]
+type = "jsonl"
+mode = "container"
