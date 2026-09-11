@@ -41,6 +41,12 @@ python -m pip install --upgrade pip
 python -m pip install -e ".[defuzex]"
 ```
 
+### 获取 KUMA SDK
+
+使用 KUMA 运行前，需要在同一个虚拟环境中安装已获授权的 DefuzeX SDK。请前往
+[DefuzeX](https://defuzex.ai/) 申请或下载 SDK 并获取访问权限，然后遵循该网站提供的
+安装说明，再以默认 KUMA SDK 运行 `agentbench run` 或 `agentbench evaluate`。
+
 创建本地环境文件并填写凭据：
 
 ```bash
@@ -73,6 +79,7 @@ agentbench run --no-view --output results/benchmark.json
 | --- | --- |
 | Python 3.10 或更高版本 | ABB 主机 CLI 与 harness。 |
 | Docker Desktop / Docker Engine | 当前可运行的内置 Agent 在 Docker 中执行；执行前 Docker 必须已启动。 |
+| DefuzeX SDK 访问权限 | KUMA 运行必需。请从 [DefuzeX](https://defuzex.ai/) 获取 SDK 及安装说明。 |
 | `KUMA_API_KEY` 或 `DEFUZEX_API_KEY` | 默认 KUMA SDK 的 Case 与 Judge 访问凭据。 |
 | `OPENROUTER_API_KEY` | Docker Agent 的模型流量经 ABB interceptor 转发到 OpenRouter。 |
 | `OPENROUTER_MODEL` | 本次运行使用的模型名称。 |
