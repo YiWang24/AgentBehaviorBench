@@ -215,7 +215,10 @@ class ModelInterceptorAddon:
 
     def _emit_error(self, flow, message):
         emit("llm_error", agent_id=self.config.agent_id, call_id=flow.metadata["defuzex_call_id"],
-             error=redact(message, self.secrets), framework_span_id=flow.metadata.get("framework_span_id"))
+             error=redact(message, self.secrets), framework_span_id=flow.metadata.get("framework_span_id"),
+             source_host=flow.metadata.get("defuzex_source_host"),
+             source_path=flow.metadata.get("defuzex_source_path"),
+             method=flow.request.method)
 
     def _error(self, flow, message, status):
         self._emit_error(flow, message)
