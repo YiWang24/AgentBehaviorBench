@@ -122,15 +122,24 @@ async def drive_run(run, invoke, directory, *, provider, repo_path=None):
         if summary['phase'] == 'judge':
             summary['judge'] = 'failed'
             request_id = getattr(exc, 'client_request_id', None)
-            if request_id and repo_path is not None:
+            if repo_path is not None:
                 # Persist only the SDK's public read-only request projection.
                 # A retryable flag is not evidence that an operation is pending.
                 from .request_recovery import inspect_requests
                 try:
-                    request = inspect_requests(repo_path, request_id)
-                    if (request.get('run_id') == run.run_id and request.get('case_id') == run.case_id
-                            and request.get('request_type') == 'judgment'):
-                        summary['request'] = request
+                    # A transport failure while polling carries no client_request_id --
+                    # the judgment was submitted and accepted, and the connection died
+                    # afterwards. Requiring the id off the exception loses the one record
+                    # that makes the verdict recoverable, so fall back to the ledger and
+                    # match on the identity this Run already knows.
+                    candidates = ([inspect_requests(repo_path, request_id)] if request_id
+                                  else inspect_requests(repo_path) or [])
+                    for request in candidates:
+                        if (request.get('run_id') == run.run_id
+                                and request.get('case_id') == run.case_id
+                                and request.get('request_type') == 'judgment'):
+                            summary['request'] = request
+                            break
                 except Exception:
                     pass  # Never replace the primary error with failed inspection.
         elif summary['phase'] == 'execution':
