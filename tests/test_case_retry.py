@@ -171,3 +171,82 @@ def test_shared_generation_block_pauses_queued_agents_but_runs_accepted_cases():
     assert calls == [('agent-0', 0)]
     assert len(suite.items) == 2
     assert all(case.error_type == 'CasePreparationPaused' for case in suite.items[1].case_results)
+
+
+def test_generation_transport_failure_is_retried_instead_of_ending_the_slot():
+    """A Case-generation slot whose request outcome is unknown gets another attempt.
+
+    Generation failures never reached RetryPolicy: _accept consults it only on the
+    execution branch, so a dropped poll ended the slot on its first attempt even though
+    the credit was already spent and the SDK's durable request ledger can resume it.
+    """
+    attempts, called = Counter(), []
+    factory = Factory(lambda agent, case, *_: (called.append(case.case_index),
+                                               result(agent, case.case_index))[1])
+    open_suite = factory.open_suite
+
+    def open_partial(*args):
+        session = open_suite(*args)
+        create = session.create
+
+        def create_partial(*args):
+            runner = create(*args)
+
+            def prepare(registration, **kwargs):
+                indices = kwargs.get('case_indices') or (0, 1)
+                attempts['batch'] += 1
+                if 1 in indices and attempts['batch'] == 1:
+                    return PreparedCaseBatch(
+                        tuple(PreparedCase(index) for index in indices if index != 1),
+                        (PreparationFailure(
+                            1, 'ServiceError', 'The KUMA service request failed.',
+                            code='invalid_response', retryable=False,
+                            artifacts={'recovery': {'action': 'replay_case', 'automatic': True,
+                                                    'phase': 'case_generation',
+                                                    'reason': 'outcome unknown'}}),))
+                return PreparedCaseBatch(tuple(PreparedCase(index) for index in indices), ())
+
+            runner.prepare_case_batch = prepare
+            return runner
+
+        session.create = create_partial
+        return session
+
+    factory.open_suite = open_partial
+    suite = SuiteRunner(runner_factory=factory, retry_policy=policy(delay=0)).run(agents(cases=2))
+    assert attempts['batch'] == 2, 'preparation was not re-dispatched for the failed slot'
+    assert sorted(called) == [0, 1]
+    assert [case.status for case in suite.items[0].case_results] == ['succeeded', 'succeeded']
+
+
+def test_generation_retry_budget_is_bounded():
+    """An always-failing generation slot stops at max_retries instead of looping."""
+    attempts = Counter()
+    factory = Factory(lambda agent, case, *_: result(agent, case.case_index))
+    open_suite = factory.open_suite
+
+    def open_partial(*args):
+        session = open_suite(*args)
+        create = session.create
+
+        def create_partial(*args):
+            runner = create(*args)
+
+            def prepare(registration, **kwargs):
+                attempts['batch'] += 1
+                return PreparedCaseBatch((), (PreparationFailure(
+                    0, 'ServiceError', 'The KUMA service request failed.',
+                    code='invalid_response', retryable=False,
+                    artifacts={'recovery': {'action': 'replay_case', 'automatic': True,
+                                            'phase': 'case_generation', 'reason': 'outcome unknown'}}),))
+
+            runner.prepare_case_batch = prepare
+            return runner
+
+        session.create = create_partial
+        return session
+
+    factory.open_suite = open_partial
+    suite = SuiteRunner(runner_factory=factory, retry_policy=policy(retries=2, delay=0)).run(agents(cases=1))
+    assert attempts['batch'] == 3, 'expected the initial attempt plus exactly two retries'
+    assert [case.status for case in suite.items[0].case_results] == ['failed']

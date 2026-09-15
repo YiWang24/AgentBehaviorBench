@@ -1,5 +1,7 @@
 """Accept independently validated Case artifacts without losing successful slots."""
 
+import time
+from dataclasses import replace
 from types import MappingProxyType
 from agentbench.harness.result import CaseResult
 
@@ -38,10 +40,13 @@ def accept_preparation(scheduler, state, job, outcome):
             'client_request_id': failure.client_request_id, 'request_id': failure.request_id})
         result = CaseResult(job.registration.agent_id, failure.case_index, identity['job_id'], 'failed',
                             error_type=failure.error_type, error_message=failure.error_message, artifacts=artifacts)
+        if _retry_preparation(scheduler, state, result, artifacts):
+            continue
         state.results[result.case_index] = result
         scheduler._publish_case(state, result)
         if (artifacts.get('recovery') or {}).get('pause_preparation') is True:
             pause_pending_preparation(scheduler, job.registration.agent_id, failure.code)
+    requeue_unprepared(scheduler, state)
     for index in outcome.unattempted_indices:
         result = CaseResult(job.registration.agent_id, index, state.identities[index]['job_id'], 'skipped',
                             error_type='CasePreparationBlocked', error_message='Case generation was not attempted')
@@ -71,3 +76,39 @@ def pause_pending_preparation(scheduler, source_agent_id, code):
             state.results[index] = result
             scheduler._publish_case(state, result)
         scheduler._finish_agent(state)
+
+
+def _retry_preparation(scheduler, state, result, artifacts) -> bool:
+    """Charge one preparation attempt against the Case retry budget.
+
+    Generation failures never reached ``RetryPolicy`` at all: ``_accept`` consults it
+    only on the execution branch, so a slot whose request outcome is merely unknown was
+    recorded as terminal on its first attempt. Leaving the slot out of ``state.results``
+    is what lets ``requeue_unprepared`` pick it up again.
+    """
+    recovery = artifacts.get('recovery') or {}
+    index = result.case_index
+    retries = state.retries.get(index, 0)
+    if not (scheduler.continue_on_error and scheduler.admission
+            and recovery.get('automatic') is True
+            and recovery.get('action') == 'replay_case'
+            and retries < scheduler.retry_policy.max_retries):
+        return False
+    state.retries[index] = retries + 1
+    delay = scheduler.retry_policy.delay(state.retries[index])
+    scheduler._publish({**state.identities[index], 'event': 'case_attempt_failed',
+                        'status': 'failed', 'case_result': result})
+    scheduler._publish({**state.identities[index], 'event': 'retry_scheduled', 'status': 'retry_wait',
+                        'retry_count': state.retries[index], 'retry_at': time.time() + delay,
+                        'recovery_action': recovery['action']})
+    return True
+
+
+def requeue_unprepared(scheduler, state) -> None:
+    """Re-dispatch preparation for slots that are neither prepared nor concluded."""
+    missing = tuple(index for index in state.identities
+                    if index not in state.prepared and index not in state.results)
+    if not missing or state in scheduler.unprepared:
+        return
+    state.preparation = replace(state.preparation, case_indices=missing)
+    scheduler.unprepared.append(state)

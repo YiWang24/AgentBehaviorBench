@@ -10,6 +10,14 @@ AUTOMATIC_RETRY_BLOCKED = frozenset({
     'invalid_api_key', 'forbidden', 'quota_exhausted', 'invalid_case_integrity',
     'case_artifact_invalid', 'case_origin_invalid', 'sensitive_data_blocked',
 })
+# Outcomes the host never learned. The reply could not be parsed, the poll never
+# returned, or the process died mid-request: in each case the Backend may well have
+# completed the work. These are not failures, they are unknowns, and Case generation
+# binds each request to a durable repository ledger keyed by the request hash, so a
+# replay resumes the original operation instead of starting - and paying for - a new one.
+GENERATION_OUTCOME_UNKNOWN = frozenset({
+    'invalid_response', 'network_error', 'operation_wait_timeout', 'request_state_unknown',
+})
 TRANSIENT_AGENT_ERRORS = frozenset({
     'TimeoutError', 'ConnectionError', 'ConnectTimeout', 'ReadTimeout',
     'ConnectError', 'ReadError', 'RemoteProtocolError', 'APIConnectionError', 'APITimeoutError',
@@ -29,6 +37,13 @@ def classify_failure(artifacts):
                'reason': 'No safe recovery is established for this failure'}
     if error.get('code') in AUTOMATIC_RETRY_BLOCKED:
         return {**blocked, 'reason': 'SDK error prohibits automatic retry; preserve the original request'}
+    # Case generation has no recovery action of its own: replay_case below is
+    # execution-only and resume_request is judge-only, so without this branch every
+    # generation transport failure is terminal for a slot the credit already paid for.
+    if (phase == 'case_generation' and not request
+            and error.get('code') in GENERATION_OUTCOME_UNKNOWN):
+        return {'action': 'replay_case', 'automatic': True, 'phase': phase,
+                'reason': 'Case generation outcome is unknown; the durable request ledger resumes it'}
     native = artifacts.get('native_failure') or {}
     transient_agent_failure = (native.get('error_type') in TRANSIENT_AGENT_ERRORS
                                and (artifacts.get('completion') or {}).get('execution') == 'failed')
