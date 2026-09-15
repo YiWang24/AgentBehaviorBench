@@ -4,8 +4,11 @@ Two upstream assumptions do not hold inside ABB's evaluation container, and both
 handled here rather than by editing upstream:
 
 * ``MasterAgent.__init__`` calls ``os.makedirs("outputs/run_<ts>")`` against the process
-  working directory, which is read-only. The binding runs it inside a private temporary
-  directory instead.
+  working directory. That is handled by ``workdir`` in agent.toml, not here: the default
+  /opt/agent is read-only, so the manifest points the working directory at a writable
+  tmpfs. The private temporary directory below is kept for a different reason -- the
+  tmpfs is capped at 64 MiB and shared by every Case in the container, so each invocation
+  reclaims its own space on close rather than accumulating rendered newspapers.
 * ``MasterAgent.run`` returns a filesystem path, not text. The Judge needs the article
   itself, so the binding reads the published file back and returns its content alongside
   the native return value.

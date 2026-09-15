@@ -25,7 +25,13 @@ dockerfile = "Dockerfile"
 
 [launch]
 argv = ["python", "-m", "agentbench.runtime.agentcontainer.worker"]
-workdir = "/opt/agent"
+# The default /opt/agent sits on the read-only root, so an Agent that writes a
+# relative path fails with EROFS before any of its own logic runs. Point the
+# working directory at a writable tmpfs instead. Only the two mount roots work:
+# they are mode 1777, while a subdirectory named here is created by Docker as
+# root and the container runs as a non-root user, which fails with EACCES.
+# /run/agentbench-tools is chosen over /tmp because it is mounted exec.
+workdir = "/run/agentbench-tools"
 
 [adapter]
 type = "langgraph"
