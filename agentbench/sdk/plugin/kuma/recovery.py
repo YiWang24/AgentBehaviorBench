@@ -34,12 +34,28 @@ def classify_failure(artifacts):
                                and (artifacts.get('completion') or {}).get('execution') == 'failed')
     container_timeout = (artifacts.get('host_error_type') == 'TimeoutExpired'
                          and artifacts.get('host_phase') == 'execute' and phase != 'judge')
+    completion = artifacts.get('completion') or {}
+    complete_execution = all(completion.get(key) == value for key, value in (
+        ('execution', 'succeeded'), ('otel', 'complete'),
+        ('submission', 'committed'), ('evidence', 'captured')))
+    # A transport failure that struck before any judgment request existed leaves nothing
+    # half-finished and nothing paid for: the Agent ran, its evidence was captured and
+    # committed, and the Judge was never asked. Replaying such a Case is exactly as safe
+    # as running it the first time. Refusing costs the whole Case for a blip the Backend
+    # produces on roughly 0.3% of requests -- which, over the hundreds of requests a Case
+    # makes, is what turns a healthy Backend into a batch that cannot finish.
+    transport_before_judgment = (phase == 'judge' and complete_execution and not request
+                                 and bool(artifacts.get('related_network_errors')))
     if (artifacts.get('safe_case_replay') is True
             and artifacts.get('cleanup_status') == 'succeeded'
             and artifacts.get('host_trace_validation') != 'failed'
-            and not request and (transient_agent_failure or container_timeout)):
+            and not request and (transient_agent_failure or container_timeout
+                                 or transport_before_judgment)):
         return {'action': 'replay_case', 'automatic': True, 'phase': 'execution',
-                'reason': 'Audited Agent permits isolated replay after a transient execution failure'}
+                'reason': ('Audited Agent permits isolated replay after a transient '
+                           'transport failure that preceded any Judge request'
+                           if transport_before_judgment else
+                           'Audited Agent permits isolated replay after a transient execution failure')}
     if request.get('status') == 'failed':
         return {**blocked, 'reason': 'The original SDK request is terminally failed'}
     if (artifacts.get('cleanup_status') != 'succeeded'
