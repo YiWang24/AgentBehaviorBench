@@ -16,14 +16,24 @@ from .image import evaluation_agent
 from agentbench.runtime.docker.worker_build import _ignore
 
 
+SDK_REPOSITORY = '/opt/abb-sdk-repo'
+
+
 class EvaluationPolicy:
     def __init__(self, state):
         self.state = state.resolve()
 
     def run_arguments(self):
+        # The SDK needs a repository whose .kuma ledger is on the same filesystem, and
+        # the host needs that ledger afterwards, so both are bind mounts. They used to
+        # land on /opt/agent/agent, which is where an Agent image may have installed its
+        # own virtualenv -- the mount then hid the interpreter on PATH and every
+        # dependency the image built. Give the SDK its own path instead; the mount source
+        # is a copy of the Agent source either way, so the repository the SDK sees is
+        # unchanged, and the image's own tree is left intact.
         return (*DockerPolicy().run_arguments(), '--mount',
-                f'type=bind,source={self.state.parent},target=/opt/agent/agent,readonly', '--mount',
-                f'type=bind,source={self.state},target=/opt/agent/agent/.kuma')
+                f'type=bind,source={self.state.parent},target={SDK_REPOSITORY},readonly', '--mount',
+                f'type=bind,source={self.state},target={SDK_REPOSITORY}/.kuma')
 
 
 def evaluate(agent, *, output, environ, timeout=2400, trace_sink=None, trace_max_bytes=262144,

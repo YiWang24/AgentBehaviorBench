@@ -15,8 +15,10 @@ from .compatibility import run_case
 from agentbench.runtime.agentcontainer.session import AgentSession
 
 
-async def execute(root, output, settings=None):
+async def execute(root, output, settings=None, sdk_repo=None):
     # 这里进入容器内的评测流程，root 是 Agent 根目录，output 是产物目录，settings 是任务配置
+    # sdk_repo 是 SDK 的仓库/ledger 根，与 Agent 源码树分开挂载。
+    repository = Path(sdk_repo) if sdk_repo is not None else root / 'agent'
     # 导入官方 Kuma SDK、证据采集工具和实际调用 Agent 的函数
     from kuma import create_run, DEFAULT_BASE_URL
     from kuma.otel import configure_trace_evidence
@@ -50,11 +52,11 @@ async def execute(root, output, settings=None):
                    'sdk': 'kuma', 'sdk_version': version('kuma-defuzex'), 'agent_id': manifest['agent_id'],
                    'sdk_base_url': DEFAULT_BASE_URL,
                    'api_key_source': credential_source,
-                   'source': manifest.get('source'), 'repo': str(root / 'agent')})
+                   'source': manifest.get('source'), 'repo': str(repository)})
         files.save('manifest.json', {'phase': 'case_generation', 'judge': 'pending'})
 
         # 组装 SDK 参数，包括仓库路径、对话步数上限、密钥、trace 证据和等待时间
-        options = dict(repo_path=root / 'agent',
+        options = dict(repo_path=repository,
                        max_steps=settings.get('max_steps'), 
                        allow_local=False, track_files=False, 
                        save_local=True,
@@ -69,7 +71,7 @@ async def execute(root, output, settings=None):
             # Generation reads the Agent profile; reuse rejects it, so the profile
             # belongs only to this branch.
             collection = generate_collection(
-                create_run, count=settings['count'], files=files, repo=root / 'agent',
+                create_run, count=settings['count'], files=files, repo=repository,
                 case_indices=settings.get('case_indices'), allow_partial=settings.get('allow_partial', False),
                 options=dict(options, agent_profile_path=root / 'evaluation/profile.md'))
             complete = not collection['failures'] and not collection['unattempted_indices']
@@ -126,7 +128,7 @@ async def execute(root, output, settings=None):
             # 读取 Agent 写出的结果，交回上层对话流程
             return json.loads((folder / 'result.json').read_text())
         # 这里开始驱动整个 Case：取输入、调用上面的 invoke、提交输出并接收 Judge 报告
-        summary = await drive_run(run, invoke, output, provider=provider, repo_path=root / 'agent')
+        summary = await drive_run(run, invoke, output, provider=provider, repo_path=repository)
         # 判断执行和证据是否完整，这里的退出码不判断 Judge 是否给出 pass
         return 0 if (summary['judge'] == 'received' and summary['otel'] == 'complete'
                      and summary['evidence'] == 'captured'
@@ -182,11 +184,15 @@ def main():
     parser.add_argument('--agent-root', type=Path, default=Path('/opt/agent'))
     parser.add_argument('--output', type=Path, default=Path('/run/abb-output'))
     parser.add_argument('--settings', type=Path, default=Path('/run/abb-input/evaluation.json'))
+    # The SDK repository is mounted separately from the Agent tree so that an Agent
+    # image installing into its own source directory is not shadowed by the mount.
+    parser.add_argument('--sdk-repo', type=Path, default=Path('/opt/abb-sdk-repo'))
     args = parser.parse_args()
     # 从宿主挂载进来的 evaluation.json 读取生成或执行模式等配置
     settings = _read_settings(args.settings)
     # 启动异步执行流程，并把它的退出码返回给进程入口
-    return asyncio.run(execute(args.agent_root, args.output, settings))
+    return asyncio.run(execute(args.agent_root, args.output, settings,
+                               sdk_repo=args.sdk_repo))
 
 
 if __name__ == '__main__':
