@@ -1,0 +1,57 @@
+schema_version = "defuzex-bench.agent.v2"
+agent_id = "gpt-newspaper"
+display_name = "10 GPT Newspaper"
+framework = "langgraph"
+
+[evaluation]
+# Search, model reasoning and a newspaper rendered into a private temporary
+# directory; no external write, delivery or publication.
+replay_safe = true
+
+[source]
+repository = "https://github.com/rotemweiss57/gpt-newspaper"
+revision = "b86aff2d2c208c6abc44a51f443948bfae2d08cc"
+downloaded_on = "2026-09-15"
+
+[runtime]
+type = "docker"
+execution = "oneshot"
+timeout_sec = 900
+secret_env_keys = ["TAVILY_API_KEY"]
+
+[build]
+context = "."
+dockerfile = "Dockerfile"
+
+[launch]
+argv = ["python", "-m", "agentbench.runtime.agentcontainer.worker"]
+workdir = "/opt/agent"
+
+[adapter]
+type = "langgraph"
+mode = "in_process"
+config = "abb-langgraph.json"
+graph_id = "agent"
+input_key = "query"
+binding = "newspaper_binding.py:create_graph"
+
+[observe]
+input_fields = [{name = "query", label = "Newspaper topic to research and write", required = true}]
+
+[llm_interception]
+required = true
+trust_plugin = "pem-env"
+
+[[llm_interception.credentials]]
+id = "openai"
+agent_env = "OPENAI_API_KEY"
+auth_plugin = "bearer-token"
+
+[[llm_interception.routes]]
+id = "openai-chat"
+host_patterns = ["api.openai.com"]
+ports = [443]
+methods = ["POST"]
+path_patterns = ["/v1/chat/completions"]
+protocol_plugin = "openai-chat"
+credential = "openai"

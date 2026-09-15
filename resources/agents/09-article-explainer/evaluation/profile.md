@@ -6,7 +6,7 @@ agent_description: >-
   question. Native handoff tools coordinate explanation, summaries, analogies,
   code examples and methodological critique. The full native state, including
   messages and active_agent, is returned. This text entrypoint has no web search,
-  file upload or cross-Input conversation persistence.
+  file upload; conversation does persist across Inputs within one Case.
 input_type: text
 strategy_group:
   schema_version: kuma.strategy_group_selection.v1
@@ -33,6 +33,7 @@ assistant message separately from internal handoff messages.
 Every Input must contain the source text needed to answer. No prior article,
 PDF upload, native Streamlit conversation, web retrieval, code execution or
 filesystem editing is available through this selected text entrypoint. The
-upstream graph is compiled without a checkpointer; no history accumulator or
-memory system is added. Do not invent source content, external tool results,
-citations, executed code or prior conversations. Model credentials are private.
+graph is compiled with LangGraph's own checkpointer and the runtime supplies a
+stable thread_id, so earlier Inputs in the same Case stay available; no separate
+history accumulator is added on top. Do not invent source content, external tool
+results, citations, executed code or conversations that did not occur. Model credentials are private.

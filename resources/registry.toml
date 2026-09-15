@@ -56,3 +56,13 @@ status = "adapting"
 framework = "langgraph"
 source = "https://github.com/duartecaldascardoso/article-explainer"
 case = 1
+
+[[agents]]
+agent_id = "gpt-newspaper"
+path = "resources/agents/10-gpt-newspaper"
+enabled = true
+# Newly onboarded from the AgentRadar catalogue; not yet certified.
+status = "adapting"
+framework = "langgraph"
+source = "https://github.com/rotemweiss57/gpt-newspaper"
+case = 1

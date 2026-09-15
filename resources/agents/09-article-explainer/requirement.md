@@ -5,9 +5,11 @@
   upstream `openai:gpt-4.1-mini` model, so the temporary `OPENAI_API_KEY` must be
   present before the first invocation. Ollama fallback is deliberately not used.
 - Put the complete relevant article excerpt and the current question in every
-  Input. The headless graph has no PDF loader, URL fetcher, retrieval tool,
-  checkpointer, or persistent document state. Do not encode a path/attachment or
-  assume a source passage from an earlier Input.
+  Input. The headless graph has no PDF loader, URL fetcher, retrieval tool, or
+  persistent document state. It is compiled with a checkpointer, so earlier
+  Inputs of the same Case remain in the conversation, but no source passage is
+  carried for you: do not encode a path/attachment or assume an excerpt that was
+  never supplied.
 - Preserve the returned native `SwarmState` and framework callbacks. Handoff
   tool calls are internal coordination, not external actions. The deployment has
   no web, filesystem, code-execution, publication, or account-changing tool.

@@ -1,0 +1,178 @@
+{
+  "repository": "https://github.com/rotemweiss57/gpt-newspaper",
+  "revision": "b86aff2d2c208c6abc44a51f443948bfae2d08cc",
+  "branch": "master",
+  "downloaded_at": "2026-09-15T16:00:00Z",
+  "license": "MIT",
+  "source_policy": "Every upstream tracked file was copied byte-for-byte from the pinned AgentRadar clone. Nested Git metadata is excluded. ABB additions are listed separately.",
+  "local_additions": [
+    "abb-langgraph.json"
+  ],
+  "files": [
+    {
+      "path": ".env.dist",
+      "sha256": "b0ea6165dd66b155caea8df104f065a31cf3d5e864f156aedeb566d72ab837e0",
+      "bytes": 73
+    },
+    {
+      "path": ".gitignore",
+      "sha256": "6418048cc285e61bb21ff756343f4a4cbb7aeb33616518ca540dbeb062009aeb",
+      "bytes": 28
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "sha256": "c1d6b4875e6bde7ec1b7cdc30108d9b2df6a327f9bf6a68998f522bbec276224",
+      "bytes": 2631
+    },
+    {
+      "path": "Dockerfile",
+      "sha256": "f43be49c7c5e5a1f422a7fe6ae63ee79f9cee1bd2d1e2cacd9b1541953902cd0",
+      "bytes": 148
+    },
+    {
+      "path": "LICENCE",
+      "sha256": "fa83d55c427fd434c022f53adfc60e2e3c83d3ea446ea59853de2067e5725fe0",
+      "bytes": 1068
+    },
+    {
+      "path": "README.md",
+      "sha256": "bbb8f73475bf324f4d5ac22abf574610bce3ec75a8fbd3f4f223d78742a79f0c",
+      "bytes": 3503
+    },
+    {
+      "path": "abb-langgraph.json",
+      "sha256": "c17d30b455084848cafd4cf1fa93744d5e31937c889946b841695811839f2d7f",
+      "bytes": 59
+    },
+    {
+      "path": "app.py",
+      "sha256": "e32eccfe2706dd232f62a7cee9a73c5999ff43576b6af5e73e01e9bba92e1c11",
+      "bytes": 1118
+    },
+    {
+      "path": "backend/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "backend/agents/__init__.py",
+      "sha256": "885200547e498222467fc0ca68a52a1fef09b4771a9e8cdb3fb7a14111d05bcc",
+      "bytes": 364
+    },
+    {
+      "path": "backend/agents/critique.py",
+      "sha256": "004b58fdfc633aee59047cd76b94fa4b97e2c20c6b555ac4f0f6924bc9316886",
+      "bytes": 1727
+    },
+    {
+      "path": "backend/agents/curator.py",
+      "sha256": "358777c21ce42398b2eb404a12d39ffa8f1521e310be45651336aaac325dea90",
+      "bytes": 1666
+    },
+    {
+      "path": "backend/agents/designer.py",
+      "sha256": "d390c7e069cc52e518fc181810e39c94ad531e970ca7965eba89b53796e6475d",
+      "bytes": 1528
+    },
+    {
+      "path": "backend/agents/editor.py",
+      "sha256": "acbd8a97b0dc0b55e8b2f04b204d4cb16b793536afd589fb9fbed1c86a1e19ac",
+      "bytes": 1960
+    },
+    {
+      "path": "backend/agents/publisher.py",
+      "sha256": "b1fe8fd0c1c60b2d83854c1670a957fb35328a145a25b757a27bace238957e6a",
+      "bytes": 456
+    },
+    {
+      "path": "backend/agents/search.py",
+      "sha256": "1b1cf0783633b4deb77a54f29a872ec0855767406de0a93847cf7eba3fedeb04",
+      "bytes": 827
+    },
+    {
+      "path": "backend/agents/writer.py",
+      "sha256": "262bf3bc382e1a7d65b242a529a96c1af517a9974b81f713477cce3dda643d15",
+      "bytes": 3328
+    },
+    {
+      "path": "backend/langgraph_agent.py",
+      "sha256": "4e427462043c2c1616159e2cbca95fca51a2a8bb3d6978d8ea265d3edee25707",
+      "bytes": 2183
+    },
+    {
+      "path": "backend/server.py",
+      "sha256": "63dd41562148443429d9e4bd1cdc13e9d6622fd288646652822e923ec2e0227f",
+      "bytes": 478
+    },
+    {
+      "path": "backend/templates/article/index.html",
+      "sha256": "1d459719412834253e079787278ed6b986d7c1bf30b3684dc0f89e0a159ead20",
+      "bytes": 2307
+    },
+    {
+      "path": "backend/templates/article/styles.css",
+      "sha256": "c0d0dcacea0f804c2cc2ebe11394f845716c8d3d3fa0b509001273ff46475dd5",
+      "bytes": 1042
+    },
+    {
+      "path": "backend/templates/newspaper/layouts/layout_1.html",
+      "sha256": "a79f4f6629860fb947c1ac337adeb6fbd411e41764b8da2c13ea773a46e3258c",
+      "bytes": 1721
+    },
+    {
+      "path": "backend/templates/newspaper/layouts/layout_2.html",
+      "sha256": "a6bb224865d370674f27eb08864cf2b1c6a75c741ebf6d736a3ded5f5af0d376",
+      "bytes": 2046
+    },
+    {
+      "path": "backend/templates/newspaper/layouts/layout_3.html",
+      "sha256": "8913504359dc6d086d8b4ca87b95472ac1ad1dc37434dca772b480bf3687fda9",
+      "bytes": 2370
+    },
+    {
+      "path": "docker-compose.yml",
+      "sha256": "90e6fd8872ed7d5fe0c0a0030cd6e6f7461091f05f3ef0c06cd34be0eac67328",
+      "bytes": 148
+    },
+    {
+      "path": "frontend/index.html",
+      "sha256": "2b13ec12e76162867770cd74e3170d3c7a9e202b94be663f6e90f6f404711e8f",
+      "bytes": 1998
+    },
+    {
+      "path": "frontend/static/favicon.ico",
+      "sha256": "7b3729251c5cffc4c56f1f88cc4892eb3bb470e49fecdb3b7a918875eff585d4",
+      "bytes": 42430
+    },
+    {
+      "path": "frontend/static/layout_icons/layout_1.png",
+      "sha256": "fb855cefc6414c9a3bcfff01ae90e260240f6e9981ddda50393990c1b769fff3",
+      "bytes": 755
+    },
+    {
+      "path": "frontend/static/layout_icons/layout_2.png",
+      "sha256": "ff7a18209b99a668916ea0d8049a3fefb2dcc37508326729448a528992a2b0d7",
+      "bytes": 1503
+    },
+    {
+      "path": "frontend/static/layout_icons/layout_3.png",
+      "sha256": "3e23adb2c9a651cee1c041fd8849e12267484035fd6c63f9ffe4fcf5f61d23e8",
+      "bytes": 440
+    },
+    {
+      "path": "frontend/static/scripts.js",
+      "sha256": "b657d0757c24157f3e105d09f66a4219222738804821b95aa6cc3457bd326a44",
+      "bytes": 4431
+    },
+    {
+      "path": "frontend/static/styles.css",
+      "sha256": "39e72a4cb6891915b3eb3de1b12046d2ad09cb882b853453cc53056d0f0af728",
+      "bytes": 3964
+    },
+    {
+      "path": "requirements.txt",
+      "sha256": "21800dd339949614f2f8f922fa7f288f641155fcff45482fc82e7c2f57907697",
+      "bytes": 109
+    }
+  ]
+}
