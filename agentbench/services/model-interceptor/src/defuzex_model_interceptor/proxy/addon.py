@@ -243,6 +243,20 @@ class ModelInterceptorAddon:
                       framework_span_id=metadata.get("framework_span_id"))
         emit("tool_error" if tool else "llm_error", **redact(fields, self.secrets))
 
+    def _error_envelope(self, code, message):
+        """Build the SDK's error contract, saying whether the failure may be retried.
+
+        The SDK reads `code` only when it is a string and defaults a missing `retryable`
+        to False, so an envelope carrying an HTTP status integer and no retryable flag
+        arrives as a fatal error. Transport and stream failures are transient by nature --
+        the request never reached a decision -- while policy, authentication and
+        conversion failures are decisions and must stay fatal.
+        """
+        retryable = code in (ErrorCode.TRANSPORT_ERROR, ErrorCode.STREAM_PROCESSING_FAILED)
+        return {"error": {"code": code.value if isinstance(code, ErrorCode) else str(code),
+                          "message": redact(message, self.secrets),
+                          "retryable": retryable}}
+
     def _error(self, flow, message, status, *, code):
         self._emit_error(flow, message, code=code, local_status=status)
         flow.metadata.pop("wire", None)
@@ -251,7 +265,7 @@ class ModelInterceptorAddon:
             flow.response = http.Response.make(200, b"", {"content-type": "application/grpc",
                 "grpc-status": str(status_code(status)), "grpc-message": quote(str(redact(message, self.secrets)))})
         else:
-            flow.response = http.Response.make(status, json_bytes({"error": {"code": status, "message": redact(message, self.secrets)}}),
+            flow.response = http.Response.make(status, json_bytes(self._error_envelope(code, message)),
                                                {"content-type": "application/json"})
 
     def error(self, flow):
@@ -260,6 +274,16 @@ class ModelInterceptorAddon:
             capture.close()
         if "defuzex_call_id" in flow.metadata:
             self._emit_error(flow, str(flow.error), code=ErrorCode.TRANSPORT_ERROR)
+            # Without a response here the client receives mitmproxy's own error page,
+            # which is not JSON, so the SDK reads it as a malformed body and marks it
+            # non-retryable. A transient upstream failure then ends the whole run: a
+            # 0.32% per-request rate killed 29% of runs because each one polls the
+            # operations endpoint up to several hundred times.
+            if getattr(flow, "response", None) is None:
+                flow.response = http.Response.make(
+                    502, json_bytes(self._error_envelope(ErrorCode.TRANSPORT_ERROR,
+                                                         str(flow.error))),
+                    {"content-type": "application/json"})
 
     def _route(self, flow):
         return next((r for r in self.config.routes if self.policy.matches(r, flow.request)), None)
