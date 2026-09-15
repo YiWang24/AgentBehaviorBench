@@ -31,6 +31,19 @@ UNITS = {
 }
 
 
+
+class _Swarm:
+    """Mirror upstream explainer.graph: a builder plus the app it compiles to."""
+
+    def __init__(self, app):
+        self.app = app
+        self.compiled_with = None
+
+    def compile(self, **options):
+        self.compiled_with = options
+        return self.app
+
+
 def binding(unit, name):
     spec = importlib.util.spec_from_file_location(name, ROOT / unit / 'bindings' / f'{name}.py')
     module = importlib.util.module_from_spec(spec)
@@ -155,7 +168,7 @@ def test_article_forwards_only_current_message_callbacks_and_entire_native_state
             calls.append((value, config))
             return native_state
     native = ModuleType('explainer.graph')
-    native.app = App()
+    native.agent_swarm = _Swarm(App())
     monkeypatch.setitem(sys.modules, 'explainer', ModuleType('explainer'))
     monkeypatch.setitem(sys.modules, 'explainer.graph', native)
     session = module.create_graph()
@@ -164,6 +177,9 @@ def test_article_forwards_only_current_message_callbacks_and_entire_native_state
     assert asyncio.run(session.ainvoke({'message': 'another complete excerpt'}, config)) is native_state
     assert calls == [({'messages': [('user', 'current excerpt')]}, config),
                      ({'messages': [('user', 'another complete excerpt')]}, config)]
+    # Without a checkpointer every Input restarts the conversation and the swarm's
+    # active_agent, so a multi-step Case degrades into unrelated single questions.
+    assert native.agent_swarm.compiled_with.get('checkpointer') is not None
     session.close()
     with pytest.raises(RuntimeError, match='closed'):
         session.invoke('later')
@@ -176,7 +192,7 @@ def test_native_article_failure_is_not_converted_to_a_successful_answer(monkeypa
         async def ainvoke(self, *args, **kwargs):
             raise failure
     native = ModuleType('explainer.graph')
-    native.app = App()
+    native.agent_swarm = _Swarm(App())
     monkeypatch.setitem(sys.modules, 'explainer', ModuleType('explainer'))
     monkeypatch.setitem(sys.modules, 'explainer.graph', native)
     with pytest.raises(RuntimeError) as caught:
