@@ -14,6 +14,12 @@
   `MasterAgent.run` returns a path rather than text. The binding chdirs into its
   own workspace and reads the published file back so the Judge receives the
   article itself. Upstream source is unchanged.
+- Upstream is pinned at `b86aff2d` (2024-02-24) and leaves every dependency
+  unbounded, so a current resolve installs a LangGraph without the `Graph` API
+  that `backend/langgraph_agent.py` imports; the first run failed with
+  `ImportError: cannot import name 'Graph' from 'langgraph.graph'`. The image
+  constrains the resolve to `langgraph==0.0.69`, the last release that exports
+  it, and asserts the import at build time so a future resolve cannot drift back.
 - Rendering is a local write into that private workspace, not delivery. The
   deployment has no mail, publication, account-changing or code-execution tool.
 - Before promotion from `adapting`, build the image, run a real `observe`,
