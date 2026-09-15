@@ -85,7 +85,16 @@ class CaseResult:
     @property
     def judge_status(self) -> str | None:
         report = self.benchmark.report if self.benchmark is not None else None
-        return getattr(report, "status", None)
+        status = getattr(report, "status", None)
+        if status is not None:
+            return status
+        # A verdict the host received but refused to accept is still a verdict, and it
+        # is the only record of one when trace validation rejects the run. Reading only
+        # benchmark.report leaves this None, so the suite summary counts zero and prints
+        # "no report" directly beneath the line that just named the retained report and
+        # its path. Host acceptance and verdict receipt are separate facts.
+        received = (self.artifacts or {}).get("received_report")
+        return received.get("status") if isinstance(received, dict) else None
 
     def __post_init__(self) -> None:
         if type(self.case_index) is not int or self.case_index < 0:

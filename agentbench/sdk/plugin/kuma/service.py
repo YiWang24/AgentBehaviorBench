@@ -142,6 +142,11 @@ def evaluate(agent, *, output, environ, timeout=2400, trace_sink=None, trace_max
         'count': generation_count, 'case_artifact': reused,
         'case_indices': generation_indices, 'allow_partial': partial_generation,
         'expected_case': {'case_id': expected_case_id, 'content_sha256': expected_content_sha256}})
+    # This directory is bind-mounted read-only at /run/abb-input and read by the
+    # container's mandatory non-root user, which is never the uid that wrote it. A
+    # restrictive host umask would otherwise leave the worker unable to read its own
+    # settings, and it fails long before the error names a permission problem.
+    _readable_by_container(inputs)
     destination = directory / 'evaluation'; destination.mkdir(mode=0o777); destination.chmod(0o777)
     identity = {**dict(job_context or {}), **dict(identity or {}),
                 'agent_id': agent.agent_id, 'artifact_run_id': directory.name,
@@ -264,6 +269,23 @@ def evaluate(agent, *, output, environ, timeout=2400, trace_sink=None, trace_max
             files.save('run.json', status)
     return directory
 
+
+
+def _readable_by_container(directory: Path) -> None:
+    """Widen a bind-mount source so a container user of any uid can read it.
+
+    Access control for these artifacts is the owning results directory, not the mode
+    of a file the harness deliberately hands to a container.
+    """
+    try:
+        directory.chmod(directory.stat().st_mode | 0o055)
+        for entry in directory.iterdir():
+            if entry.is_file() and not entry.is_symlink():
+                entry.chmod(entry.stat().st_mode | 0o044)
+    except OSError:
+        # A read-only or exotic filesystem is not a reason to abandon the run; the
+        # container will report the unreadable path itself if this was load-bearing.
+        pass
 
 def _trace_preview(value, *, depth=0, budget=None):
     """Bound queued UI values while keeping common payload preview shapes."""

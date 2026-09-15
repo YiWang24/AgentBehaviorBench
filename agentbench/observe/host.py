@@ -3,7 +3,7 @@ import asyncio
 from pathlib import Path
 from uuid import uuid4
 from .invocation import InvocationObservation
-from .store import atomic_json, json_value, redact
+from .store import environment_secrets, atomic_json, json_value, redact
 
 
 class HostObservation:
@@ -22,7 +22,7 @@ class HostObservation:
 
     def _save(self):
         import os
-        secrets = tuple(v for k, v in os.environ.items() if any(x in k.upper() for x in ('KEY', 'TOKEN', 'SECRET', 'PASSWORD')))
+        secrets = environment_secrets()
         atomic_json(self.directory / 'run.json', redact(json_value(self.metadata), secrets))
 
     async def invoke(self, running, test_input, config):

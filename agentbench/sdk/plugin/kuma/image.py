@@ -67,8 +67,16 @@ def evaluation_agent(agent, *, control=None, deadline=None):
         users = re.findall(r'(?im)^USER\s+(.+)$', original)
         if not users or users[-1].strip() in ('root', '0'):
             raise ValueError('Evaluation requires an explicit non-root image USER')
+        # The SDK has to land in the interpreter the worker will actually use, which is
+        # whatever `python` the Agent image's PATH resolves to. That interpreter is not
+        # guaranteed to have pip: an image that puts a uv-created venv first on PATH has
+        # none, and the install layer fails with "No module named pip" before any Case
+        # exists. ensurepip ships a bundled wheel, so bootstrapping needs no network and
+        # stays inside the egress policy.
         dockerfile.write_text(original + '\nUSER root\nCOPY .abb-sdk/ /opt/abb-sdk/\n'
-                             'RUN python -m pip --isolated install --no-cache-dir '
+                             'RUN (python -m pip --version >/dev/null 2>&1 '
+                             '|| python -m ensurepip --default-pip) '
+                             '&& python -m pip --isolated install --no-cache-dir '
                              '--index-url https://pypi.org/simple '
                              '-r /opt/abb-sdk/requirements.txt\n'
                              'COPY evaluation/ /opt/agent/evaluation/\nUSER ' + users[-1] + '\n')

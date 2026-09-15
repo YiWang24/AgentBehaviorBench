@@ -9,3 +9,4 @@ __pycache__/
 results/
 .history-trash/
 cache/
+.venv/

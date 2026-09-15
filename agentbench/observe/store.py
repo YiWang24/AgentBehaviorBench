@@ -39,6 +39,38 @@ def redact(value, secrets=()):
     return value
 
 
+_SECRET_NAME_TOKENS = ("KEY", "TOKEN", "SECRET", "PASSWORD")
+_MIN_SECRET_LENGTH = 12
+
+
+def environment_secrets(environ=None) -> tuple[str, ...]:
+    """Values worth removing from artifacts, selected by name *and* by shape.
+
+    Selecting on the variable name alone sweeps in ordinary settings whose names merely
+    contain KEY or TOKEN -- a keyring backend selector, a token limit -- whose values are
+    short, common words. Each such value then becomes a global substring rule and rewrites
+    unrelated text: GOG_KEYRING_BACKEND=file turns `is_file()` into `is_[REDACTED]()` in
+    the one traceback that explained a failure, and makes tests fail whose temporary
+    directories are named after it. A real credential is long and is not a bare number, so
+    requiring that costs nothing and stops the collateral damage.
+
+    This is the single definition; six call sites had grown copies of the name-only test.
+    """
+    values = os.environ if environ is None else environ
+    return tuple(value for key, value in values.items()
+                 if isinstance(value, str)
+                 and any(token in key.upper() for token in _SECRET_NAME_TOKENS)
+                 and len(value.strip()) >= _MIN_SECRET_LENGTH
+                 and not value.strip().isdigit())
+
+
+def _umask_file_mode() -> int:
+    """The mode a plain open() would have produced, for restoring umask semantics."""
+    current = os.umask(0o022)
+    os.umask(current)
+    return 0o666 & ~current
+
+
 def atomic_json(path: Path, value):
     # Independent writers must never share the same intermediate pathname.
     stream = tempfile.NamedTemporaryFile(
@@ -49,6 +81,12 @@ def atomic_json(path: Path, value):
     try:
         with stream:
             json.dump(json_value(value), stream, ensure_ascii=False, indent=2)
+        # NamedTemporaryFile always creates 0600 and replace() preserves it. That is a
+        # side effect of using it for unique intermediate names, not an access decision:
+        # artifacts are read back by the host after a container wrote them, and by the
+        # container after the host wrote them. Restore the mode the previous
+        # write_text() implementation produced.
+        os.chmod(temporary, _umask_file_mode())
         temporary.replace(path)
     finally:
         temporary.unlink(missing_ok=True)
@@ -62,8 +100,7 @@ class TraceStore:
         self.context = dict(context or {})
         self._lock = threading.Lock()
         environment = os.environ if environ is None else environ
-        self._secrets = tuple(v for k, v in environment.items()
-                              if any(x in k.upper() for x in ("KEY", "TOKEN", "SECRET", "PASSWORD")))
+        self._secrets = environment_secrets(environment)
 
     def record(self, event: str, **data):
         row = {"schema": "abb.observe.event.v1", "run_id": self.run_id,

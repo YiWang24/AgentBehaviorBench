@@ -152,15 +152,39 @@ async def execute(root, output, settings=None):
             provider.shutdown()
 
 
+def _read_settings(path: Path) -> dict:
+    """Read the host-supplied settings, distinguishing absent from unreadable.
+
+    is_file() answers False for a path this process cannot stat through, so guarding
+    the read with it turns a permission problem into an empty settings object and the
+    worker runs misconfigured instead of stopping.
+    """
+    try:
+        return json.loads(path.read_text())
+    except FileNotFoundError:
+        return {}
+    except OSError as exc:
+        raise SystemExit(
+            f'Cannot read evaluation settings at {path}: {exc.strerror}. '
+            f'The container runs as uid {os.getuid()}; the host must make that file '
+            f'readable by it.'
+        ) from exc
+
+
 def main():
     # 容器进程先进入这里，读取 Agent 路径、产物路径和任务配置文件路径
+    # Everything written below leaves the container for the host's results directory,
+    # where the host process reads it back as a different uid. The default 0o022 keeps
+    # those artifacts readable; without it they land 0600 under the container's uid and
+    # the host silently sees an empty run.
+    os.umask(0o022)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--agent-root', type=Path, default=Path('/opt/agent'))
     parser.add_argument('--output', type=Path, default=Path('/run/abb-output'))
     parser.add_argument('--settings', type=Path, default=Path('/run/abb-input/evaluation.json'))
     args = parser.parse_args()
     # 从宿主挂载进来的 evaluation.json 读取生成或执行模式等配置
-    settings = json.loads(args.settings.read_text()) if args.settings.is_file() else {}
+    settings = _read_settings(args.settings)
     # 启动异步执行流程，并把它的退出码返回给进程入口
     return asyncio.run(execute(args.agent_root, args.output, settings))
 

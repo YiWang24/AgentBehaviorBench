@@ -38,6 +38,25 @@ def read_diagnostic(directory, relative):
         return {}
 
 
+def unreadable_reason(directory, relative):
+    """Say why an artifact could not be read, or None if it was readable or absent.
+
+    read_diagnostic() answers {} for absent, malformed and unreadable alike, which is
+    right for an optional diagnostic and wrong for a required artifact: a container
+    that wrote a result the host cannot read is not a container that produced nothing.
+    """
+    try:
+        path = artifact_path(directory, relative)
+        with path.open("rb"):
+            return None
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        return f"{relative} exists but could not be read: {exc.strerror}"
+    except (ValueError, RuntimeError) as exc:
+        return f"{relative} could not be resolved: {type(exc).__name__}"
+
+
 def _text(value, limit=500):
     if not isinstance(value, (str, int, float, bool)):
         return None

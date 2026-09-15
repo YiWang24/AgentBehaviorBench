@@ -2,7 +2,7 @@
 from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
 import os
-from agentbench.observe.store import atomic_json, redact
+from agentbench.observe.store import atomic_json, environment_secrets, redact
 
 
 def plain(value):
@@ -15,12 +15,13 @@ def plain(value):
     return value
 
 
+
+
 class Artifacts:
     def __init__(self, directory, *, environ=None):
         self.directory = directory
         environment = os.environ if environ is None else environ
-        self.secrets = tuple(v for k, v in environment.items()
-                             if any(x in k.upper() for x in ('KEY', 'TOKEN', 'SECRET', 'PASSWORD')))
+        self.secrets = environment_secrets(environment)
 
     def save(self, relative, value):
         path = self.directory / relative

@@ -9,10 +9,19 @@ from agentbench.sdk.contracts import PreparationFailure, PreparedCaseBatch
 from agentbench.observe.store import redact
 
 from .case_files import collection_artifact, prepare_artifact
-from .diagnostics import collect_artifacts, evaluation_failure, read_diagnostic
+from .diagnostics import (collect_artifacts, evaluation_failure, read_diagnostic,
+                          unreadable_reason)
 from .generation import SCHEMA, selected_indices, validate_collection, validate_entries
 from .generation_failures import SHARED_GENERATION_BLOCKS
 
+
+def _unreadable_batch(directory):
+    """Report the first generation artifact that exists but cannot be read."""
+    for relative in ('evaluation/case-collection.json', 'evaluation/manifest.json'):
+        reason = unreadable_reason(directory, relative)
+        if reason is not None:
+            return reason
+    return None
 
 def prepare_batch(runner, registration, *, evaluator, case_indices=None,
                   on_progress=None, allow_partial=True):
@@ -73,6 +82,16 @@ def prepare_batch(runner, registration, *, evaluator, case_indices=None,
             files.save('evaluation/case-collection.json', collection)
         else:
             collection = read_diagnostic(directory, 'evaluation/case-collection.json')
+            # An empty collection means the batch failed only if the artifact is really
+            # absent. If it is there but unreadable, Cases were generated and billed,
+            # and reporting a generation failure states the opposite of what happened.
+            if not collection:
+                blocked = _unreadable_batch(directory)
+                if blocked is not None:
+                    raise evaluation_failure(
+                        directory,
+                        f'Case batch generated but its result could not be read: {blocked}',
+                        environ=runner.environ)
             if not allow_partial:
                 if read_diagnostic(directory, 'run.json').get('status') != 'succeeded':
                     raise evaluation_failure(directory, 'Case batch generation failed', environ=runner.environ)
