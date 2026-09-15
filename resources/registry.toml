@@ -66,3 +66,30 @@ status = "adapting"
 framework = "langgraph"
 source = "https://github.com/rotemweiss57/gpt-newspaper"
 case = 1
+
+[[agents]]
+agent_id = "langgraph-fullstack-python"
+path = "resources/agents/11-langgraph-fullstack-python"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "local"
+case = 1
+
+[[agents]]
+agent_id = "local-rag-researcher-deepseek"
+path = "resources/agents/13-local-rag-researcher-deepseek"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "local"
+case = 1
+
+[[agents]]
+agent_id = "event-deep-research"
+path = "resources/agents/15-event-deep-research"
+enabled = true
+status = "adapting"
+framework = "langgraph"
+source = "local"
+case = 1

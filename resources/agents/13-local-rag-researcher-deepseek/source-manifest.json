@@ -1,0 +1,88 @@
+{
+  "repository": "164_kaymen99__local-rag-researcher-deepseek",
+  "revision": "local-snapshot",
+  "branch": "unknown",
+  "downloaded_at": "2026-09-15T00:00:00Z",
+  "license": "see upstream",
+  "source_policy": "Copied byte-for-byte from the pinned AgentRadar clone.",
+  "local_additions": [
+    "abb-langgraph.json"
+  ],
+  "files": [
+    {
+      "path": ".env.example",
+      "sha256": "c98abda3309a8fead21f25f6332c3d0353ee2b18c97ba015eea382211d60e2a8",
+      "bytes": 508
+    },
+    {
+      "path": "README.md",
+      "sha256": "c8e6fea0b4975d6173e513a845b783415d65df63de2a9a1f3fa8d65a85a22d03",
+      "bytes": 6470
+    },
+    {
+      "path": "abb-langgraph.json",
+      "sha256": "92079db9d59cddd278b3109919980bc8ef67fcf283b9ea746bf92451fb8a58e7",
+      "bytes": 55
+    },
+    {
+      "path": "app.py",
+      "sha256": "da65c8b100fea91ade8c4a807bbdb2a0aa2d3085a13dbbe156b9c8f96fa5eaea",
+      "bytes": 7537
+    },
+    {
+      "path": "langgraph.json",
+      "sha256": "5da70bdce216c3a58d8391e99596d12c17c549db39645b0dc990ef8ef187c9e4",
+      "bytes": 205
+    },
+    {
+      "path": "report_structures/financial report.md",
+      "sha256": "719dd880e5380c5ef09539a581775fbf0412995b6714e0cfd7f88c98f8e562d1",
+      "bytes": 746
+    },
+    {
+      "path": "report_structures/standard report.md",
+      "sha256": "01fd7b67dbded761fe1edaafb03e251ffacb51eaf4410c23ec515b0499e6f044",
+      "bytes": 607
+    },
+    {
+      "path": "requirements.txt",
+      "sha256": "7d6600f7624e419bc5f836136ed8f0416130d17e761b30f174eafac73fef7584",
+      "bytes": 238
+    },
+    {
+      "path": "run_researcher.py",
+      "sha256": "8a1641679a09bd6a48b7ae6acc1ce0994b35e95b732e3ef57b63799bee9e5209",
+      "bytes": 1816
+    },
+    {
+      "path": "src/assistant/configuration.py",
+      "sha256": "f4a6fed58d80553a494f0d8c657da7008588d075dcc509af58f3912137827ba0",
+      "bytes": 1587
+    },
+    {
+      "path": "src/assistant/graph.py",
+      "sha256": "485570ecc9bd7a0d5bb2c24ed96ad0c385134fce4255235b7d52f02937d6145a",
+      "bytes": 9796
+    },
+    {
+      "path": "src/assistant/prompts.py",
+      "sha256": "afae25977cb28bc97a4c95b1230c7caef086b24f95da9adbb7a0ae1e9f24401e",
+      "bytes": 2922
+    },
+    {
+      "path": "src/assistant/state.py",
+      "sha256": "cbd77d29dcb85570ab084f0d4429d2bbadf7fa5454834ceefd9f783f75e4dafe",
+      "bytes": 728
+    },
+    {
+      "path": "src/assistant/utils.py",
+      "sha256": "8c1b47f286ebcdb9edf1b4331deeb7bf5e8b5e8352440ca65c9175b24c8d3868",
+      "bytes": 5711
+    },
+    {
+      "path": "src/assistant/vector_db.py",
+      "sha256": "7eb66919769ab4ee709bf809f82e72e6207374fb67571b4784e4e77d572d99fe",
+      "bytes": 2656
+    }
+  ]
+}

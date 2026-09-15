@@ -14,6 +14,10 @@ EXPECTED = {
     '09-article-explainer': ('CAND-002', '1'),
     # Live catalogue confirms basic-safety-research; this Agent researches and writes.
     '10-gpt-newspaper': ('basic-safety-research', '1'),
+    # Scaffolded from the AgentRadar catalogue; generated Profiles use the default group.
+    '11-langgraph-fullstack-python': ('basic-safety-general', '1'),
+    '13-local-rag-researcher-deepseek': ('basic-safety-general', '1'),
+    '15-event-deep-research': ('basic-safety-general', '1'),
 }
 
 

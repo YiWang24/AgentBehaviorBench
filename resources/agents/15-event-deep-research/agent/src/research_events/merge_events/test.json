@@ -1,0 +1,445 @@
+{
+  "existing_events": [
+    {
+      "name": "Henry Miller was born",
+      "description": "Henry Valentine Miller was born on December 26 in New York City.",
+      "date": {
+        "year": 1891,
+        "note": "December 26"
+      },
+      "location": "New York City",
+      "id": "henry_miller_born"
+    },
+    {
+      "name": "Family moved to Brooklyn",
+      "description": "Miller's family moved to 1063 Decatur Street in Brooklyn's Bushwick neighborhood.",
+      "date": {
+        "year": 1900,
+        "note": ""
+      },
+      "location": "Brooklyn, New York City",
+      "id": "henry_miller_family_moved_to_brooklyn"
+    },
+    {
+      "name": "Henry Miller was active with the Socialist Party of America",
+      "description": "Miller was active with the Socialist Party of America.",
+      "date": {
+        "year": 1900,
+        "note": "circa"
+      },
+      "location": "New York",
+      "id": "henry_miller_active_with_the_socialist_party_of_america"
+    },
+    {
+      "name": "Attended Eastern District High School",
+      "description": "Miller attended Eastern District High School in Williamsburg, Brooklyn, after finishing elementary school.",
+      "date": {
+        "year": 1900,
+        "note": "early 1900s"
+      },
+      "location": "Williamsburg, Brooklyn",
+      "id": "henry_miller_attended_high_school"
+    },
+    {
+      "name": "Attended City College of New York",
+      "description": "Miller attended the City College of New York for one semester.",
+      "date": {
+        "year": 1910,
+        "note": "early 1910s"
+      },
+      "location": "New York City",
+      "id": "henry_miller_attended_city_college"
+    },
+    {
+      "name": "Henry Miller married Beatrice Sylvas Wickens",
+      "description": "Miller married Beatrice Sylvas Wickens, an amateur pianist.",
+      "date": {
+        "year": 1917,
+        "note": ""
+      },
+      "location": "New York",
+      "id": "henry_miller_married_beatrice_sylvas_wickens"
+    },
+    {
+      "name": "Daughter Barbara born",
+      "description": "Miller and Beatrice had a daughter named Barbara.",
+      "date": {
+        "year": 1919,
+        "note": ""
+      },
+      "location": "New York",
+      "id": "henry_miller_daughter_barbara_born"
+    },
+    {
+      "name": "Worked at Western Union",
+      "description": "Miller worked at Western Union as personnel manager in the messenger department.",
+      "date": {
+        "year": 1920,
+        "note": "1920-1924"
+      },
+      "location": "New York City",
+      "id": "henry_miller_worked_at_western_union"
+    },
+    {
+      "name": "Wrote first novel Clipped Wings",
+      "description": "Miller wrote his first novel, 'Clipped Wings,' during a three-week vacation in March (unpublished, only fragments remain).",
+      "date": {
+        "year": 1922,
+        "note": "March"
+      },
+      "location": "New York City",
+      "id": "henry_miller_wrote_clipped_wings"
+    },
+    {
+      "name": "Divorced Beatrice Sylvas Wickens",
+      "description": "Miller was divorced from Beatrice Sylvas Wickens.",
+      "date": {
+        "year": 1923,
+        "note": "December 21"
+      },
+      "location": "New York",
+      "id": "henry_miller_divorced_beatrice"
+    },
+    {
+      "name": "Met June Mansfield",
+      "description": "Miller met and became enamored of June Mansfield (born Juliet Edith Smerth) at a dance hall.",
+      "date": {
+        "year": 1923,
+        "note": ""
+      },
+      "location": "New York",
+      "id": "henry_miller_met_june_mansfield"
+    },
+    {
+      "name": "Married June Mansfield",
+      "description": "Miller married June Mansfield.",
+      "date": {
+        "year": 1924,
+        "note": "June 1"
+      },
+      "location": "New York",
+      "id": "henry_miller_married_june_mansfield"
+    },
+    {
+      "name": "Quit Western Union to write",
+      "description": "Miller quit his job at Western Union to dedicate himself completely to writing.",
+      "date": {
+        "year": 1924,
+        "note": ""
+      },
+      "location": "New York",
+      "id": "henry_miller_quit_western_union"
+    },
+    {
+      "name": "Wrote Moloch",
+      "description": "Miller wrote 'Moloch: or, This Gentile World,' initially under the guise of a novel by June Mansfield (unpublished until 1992).",
+      "date": {
+        "year": 1927,
+        "note": "1927-1928"
+      },
+      "location": "New York",
+      "id": "henry_miller_wrote_moloch"
+    },
+    {
+      "name": "Spent months in Paris with June",
+      "description": "Miller spent several months in Paris with June, trip financed by Roland Freedman.",
+      "date": {
+        "year": 1928,
+        "note": ""
+      },
+      "location": "Paris, France",
+      "id": "henry_miller_paris_with_june_1928"
+    },
+    {
+      "name": "Moved to Paris alone",
+      "description": "Miller moved to Paris unaccompanied.",
+      "date": {
+        "year": 1930,
+        "note": ""
+      },
+      "location": "Paris, France",
+      "id": "henry_miller_moved_to_paris_alone"
+    },
+    {
+      "name": "Proofreader for Chicago Tribune Paris",
+      "description": "Miller was employed by the Chicago Tribune Paris edition as a proofreader.",
+      "date": {
+        "year": 1931,
+        "note": ""
+      },
+      "location": "Paris, France",
+      "id": "henry_miller_proofreader_chicago_tribune"
+    },
+    {
+      "name": "Published Tropic of Cancer",
+      "description": "Miller's first published book, 'Tropic of Cancer,' was published by Obelisk Press (banned in the United States).",
+      "date": {
+        "year": 1934,
+        "note": ""
+      },
+      "location": "Paris, France",
+      "id": "henry_miller_published_tropic_of_cancer"
+    },
+    {
+      "name": "Divorced by June in Mexico",
+      "description": "June divorced Miller by proxy.",
+      "date": {
+        "year": 1934,
+        "note": ""
+      },
+      "location": "Mexico City, Mexico",
+      "id": "henry_miller_divorced_by_june"
+    },
+    {
+      "name": "Published Black Spring",
+      "description": "Miller published 'Black Spring' (banned in the United States).",
+      "date": {
+        "year": 1936,
+        "note": ""
+      },
+      "location": "Paris, France",
+      "id": "henry_miller_published_black_spring"
+    },
+    {
+      "name": "Published Tropic of Capricorn",
+      "description": "Miller published 'Tropic of Capricorn' (banned in the United States).",
+      "date": {
+        "year": 1939,
+        "note": ""
+      },
+      "location": "Paris, France",
+      "id": "henry_miller_published_tropic_of_capricorn"
+    },
+    {
+      "name": "Visited Greece",
+      "description": "Miller visited Greece, invited by Lawrence Durrell who was living in Corfu.",
+      "date": {
+        "year": 1939,
+        "note": ""
+      },
+      "location": "Greece",
+      "id": "henry_miller_visited_greece"
+    },
+    {
+      "name": "Returned to New York",
+      "description": "Miller returned to New York.",
+      "date": {
+        "year": 1940,
+        "note": ""
+      },
+      "location": "New York City",
+      "id": "henry_miller_returned_to_new_york"
+    },
+    {
+      "name": "Published The Colossus of Maroussi",
+      "description": "Miller described his visit to Greece in 'The Colossus of Maroussi'.",
+      "date": {
+        "year": 1941,
+        "note": ""
+      },
+      "location": "United States",
+      "id": "henry_miller_published_colossus_of_maroussi"
+    },
+    {
+      "name": "Moved to California",
+      "description": "Miller moved to California in June, initially residing just outside Hollywood in Beverly Glen.",
+      "date": {
+        "year": 1942,
+        "note": "June"
+      },
+      "location": "California",
+      "id": "henry_miller_moved_to_california"
+    },
+    {
+      "name": "Began writing Sexus",
+      "description": "Miller began writing 'Sexus,' the first novel in 'The Rosy Crucifixion' trilogy.",
+      "date": {
+        "year": 1942,
+        "note": ""
+      },
+      "location": "California",
+      "id": "henry_miller_began_sexus"
+    },
+    {
+      "name": "Settled in Big Sur",
+      "description": "Miller settled in Big Sur.",
+      "date": {
+        "year": 1944,
+        "note": ""
+      },
+      "location": "Big Sur, California",
+      "id": "henry_miller_settled_big_sur"
+    },
+    {
+      "name": "Married Janina Martha Lepska",
+      "description": "Miller married Janina Martha Lepska.",
+      "date": {
+        "year": 1944,
+        "note": ""
+      },
+      "location": "United States",
+      "id": "henry_miller_married_janina_lepska"
+    },
+    {
+      "name": "Published Sunday After the War",
+      "description": "Miller published 'Sunday After the War'.",
+      "date": {
+        "year": 1944,
+        "note": ""
+      },
+      "location": "United States",
+      "id": "henry_miller_published_sunday_after_the_war"
+    },
+    {
+      "name": "Published The Air-Conditioned Nightmare",
+      "description": "Miller published 'The Air-Conditioned Nightmare'.",
+      "date": {
+        "year": 1945,
+        "note": ""
+      },
+      "location": "United States",
+      "id": "henry_miller_published_air_conditioned_nightmare"
+    },
+    {
+      "name": "Lived in Big Sur with bohemian writers",
+      "description": "Miller continued living in Big Sur with other bohemian writers.",
+      "date": {
+        "year": 1947,
+        "note": "from 1947"
+      },
+      "location": "Big Sur, California",
+      "id": "henry_miller_lived_big_sur_bohemians"
+    },
+    {
+      "name": "Divorced Janina Martha Lepska",
+      "description": "Miller was divorced from Janina Martha Lepska.",
+      "date": {
+        "year": 1952,
+        "note": ""
+      },
+      "location": "United States",
+      "id": "henry_miller_divorced_janina"
+    },
+    {
+      "name": "Married artist Eve McClure",
+      "description": "Miller married artist Eve McClure.",
+      "date": {
+        "year": 1953,
+        "note": ""
+      },
+      "location": "United States",
+      "id": "henry_miller_married_eve_mcclure"
+    },
+    {
+      "name": "Published Big Sur and the Oranges of Hieronymus Bosch",
+      "description": "Miller published 'Big Sur and the Oranges of Hieronymus Bosch'.",
+      "date": {
+        "year": 1957,
+        "note": ""
+      },
+      "location": "United States",
+      "id": "henry_miller_published_big_sur_oranges"
+    },
+    {
+      "name": "Completed The Rosy Crucifixion trilogy",
+      "description": "Miller completed 'The Rosy Crucifixion' trilogy (initially banned in the U.S., published in France and Japan).",
+      "date": {
+        "year": 1959,
+        "note": ""
+      },
+      "location": "United States",
+      "id": "henry_miller_completed_rosy_crucifixion"
+    },
+    {
+      "name": "Divorced Eve McClure",
+      "description": "Miller was divorced from Eve McClure.",
+      "date": {
+        "year": 1960,
+        "note": ""
+      },
+      "location": "United States",
+      "id": "henry_miller_divorced_eve"
+    },
+    {
+      "name": "Reunion with June in New York",
+      "description": "Miller arranged a reunion with ex-wife June in New York.",
+      "date": {
+        "year": 1961,
+        "note": ""
+      },
+      "location": "New York",
+      "id": "henry_miller_reunion_with_june"
+    },
+    {
+      "name": "Tropic of Cancer published in the US",
+      "description": "'Tropic of Cancer' was published in the United States by Grove Press, leading to obscenity trials.",
+      "date": {
+        "year": 1961,
+        "note": ""
+      },
+      "location": "United States",
+      "id": "henry_miller_tropic_cancer_us_publication"
+    },
+    {
+      "name": "Moved to Pacific Palisades",
+      "description": "Miller moved to 444 Ocampo Drive, Pacific Palisades, Los Angeles.",
+      "date": {
+        "year": 1963,
+        "note": ""
+      },
+      "location": "Pacific Palisades, Los Angeles, California",
+      "id": "henry_miller_moved_pacific_palisades"
+    },
+    {
+      "name": "Married Hiroko Tokuda",
+      "description": "Miller married Hiroko Tokuda.",
+      "date": {
+        "year": 1967,
+        "note": ""
+      },
+      "location": "United States",
+      "id": "henry_miller_married_hiroko_tokuda"
+    },
+    {
+      "name": "Published On Turning Eighty",
+      "description": "Miller published 'On Turning Eighty,' a chapbook with 200 copies.",
+      "date": {
+        "year": 1972,
+        "note": ""
+      },
+      "location": "United States",
+      "id": "henry_miller_published_on_turning_eighty"
+    },
+    {
+      "name": "Nominated for Nobel Prize",
+      "description": "Miller was nominated for the Nobel Prize in Literature by University of Copenhagen professor Allan Philip.",
+      "date": {
+        "year": 1973,
+        "note": ""
+      },
+      "location": "",
+      "id": "henry_miller_nobel_nomination"
+    },
+    {
+      "name": "Divorced Hiroko Tokuda",
+      "description": "Miller was divorced from Hiroko Tokuda.",
+      "date": {
+        "year": 1977,
+        "note": ""
+      },
+      "location": "United States",
+      "id": "henry_miller_divorced_hiroko"
+    },
+    {
+      "name": "Henry Miller died",
+      "description": "Henry Miller died of circulatory complications at home.",
+      "date": {
+        "year": 1980,
+        "note": "June 7"
+      },
+      "location": "Pacific Palisades, Los Angeles",
+      "id": "henry_miller_died"
+    }
+  ],
+  "url_events_summarized": " Henry Valentine Miller was born at his family's home, 450 East 85th Street, in the Yorkville section of Manhattan, New York City, U.S. He was the son of Lutheran German parents, Louise Marie (Neiting) and tailor Heinrich Miller. Miller attended Eastern District High School in Williamsburg, Brooklyn, after finishing elementary school While he was a socialist, his idol was the black Socialist Hubert Harrison Miller married his first wife, Beatrice Sylvas Wickens, in 1917;[11] their divorce was granted on December 21, 1923.[12] Together they had a daughter, Barbara, born in 1919"
+}

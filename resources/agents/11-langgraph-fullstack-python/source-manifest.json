@@ -1,0 +1,113 @@
+{
+  "repository": "148_langchain-ai__langgraph-fullstack-python",
+  "revision": "local-snapshot",
+  "branch": "unknown",
+  "downloaded_at": "2026-09-15T00:00:00Z",
+  "license": "see upstream",
+  "source_policy": "Copied byte-for-byte from the pinned AgentRadar clone.",
+  "local_additions": [
+    "abb-langgraph.json"
+  ],
+  "files": [
+    {
+      "path": ".codespellignore",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": ".env.example",
+      "sha256": "8d2a9e88a8e68e80a6537421295c0452942e8fe45a6b636353ff373d1ae55aa9",
+      "bytes": 234
+    },
+    {
+      "path": ".github/workflows/integration-tests.yml",
+      "sha256": "507b5d7711fd7139eae4e2ebf22584cb24898bef17296290502312763f62617d",
+      "bytes": 1505
+    },
+    {
+      "path": ".github/workflows/unit-tests.yml",
+      "sha256": "339b80fa08c9b14cda9559ede9bbd9a16ca3181fc0d7b3a0b98c71c4ee819612",
+      "bytes": 1688
+    },
+    {
+      "path": ".gitignore",
+      "sha256": "9ab86676dff249d77c74bafacce824814e7192bdb3ca7f9f5a6c10e2b5df2a03",
+      "bytes": 3147
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "a01dcffdc1291b4043f2a81d249a9f3e45c9036f2308c9cdfeefe18371371e80",
+      "bytes": 1066
+    },
+    {
+      "path": "Makefile",
+      "sha256": "419bf6194180fa2fe697fd640bed0d24c24e602fff318450c1379ce64d791b8e",
+      "bytes": 2000
+    },
+    {
+      "path": "README.md",
+      "sha256": "cbbb7e3d6737c26e6407e816df89ec63c0a337f1901d53bc949a123f224da694",
+      "bytes": 8304
+    },
+    {
+      "path": "abb-langgraph.json",
+      "sha256": "92079db9d59cddd278b3109919980bc8ef67fcf283b9ea746bf92451fb8a58e7",
+      "bytes": 55
+    },
+    {
+      "path": "langgraph.json",
+      "sha256": "7587beb25fa6d979bab01a0ff350b54ae8bb6ca3ebe2769727a38eba217cbe85",
+      "bytes": 280
+    },
+    {
+      "path": "pyproject.toml",
+      "sha256": "5ee89a0b37bffede8261a30ba95691558d3dea663ad985e0eee93a1ce2186854",
+      "bytes": 1744
+    },
+    {
+      "path": "src/react_agent/__init__.py",
+      "sha256": "06a101ecbc06b81513e5f739a27300ad8f8201b8259fc6edb07cb94d8856867e",
+      "bytes": 177
+    },
+    {
+      "path": "src/react_agent/app.py",
+      "sha256": "730938970263836b8d49320268943fc408ca3920ac6c0f86db7ffea685a6c310",
+      "bytes": 23063
+    },
+    {
+      "path": "src/react_agent/auth.py",
+      "sha256": "2aebdfe43c12291657686341d8d8945c355ebba5fad958569cb18a31c211db80",
+      "bytes": 236
+    },
+    {
+      "path": "src/react_agent/graph.py",
+      "sha256": "e749cd0aefbf6166b893e85a0d578621092418699e250e9188c647c82527b39f",
+      "bytes": 214
+    },
+    {
+      "path": "tests/cassettes/103fe67e-a040-4e4e-aadb-b20a7057f904.yaml",
+      "sha256": "e2081d038cbc529a1c7630cb8e225422711a27fdf90ce9a600ef33dd6c7165bf",
+      "bytes": 124919
+    },
+    {
+      "path": "tests/integration_tests/__init__.py",
+      "sha256": "8a7f7e2ef440f249bf8386d5f34a7bca4356f5df49c870b2627ba6205e79cea0",
+      "bytes": 63
+    },
+    {
+      "path": "tests/integration_tests/test_graph.py",
+      "sha256": "ba3c0607d13503f47917538c3c820c5e71570060a0c9d12cee318a7b5a4442dc",
+      "bytes": 257
+    },
+    {
+      "path": "tests/unit_tests/__init__.py",
+      "sha256": "b1a2d1776f2b31d77dfa055e7271d0daeb5a01b1cc5768bb58de10df63b6535c",
+      "bytes": 60
+    },
+    {
+      "path": "tests/unit_tests/test_configuration.py",
+      "sha256": "551225a4cef4e163256bcf95f56edb48563840996936bf771ee773dd98cf0743",
+      "bytes": 66
+    }
+  ]
+}

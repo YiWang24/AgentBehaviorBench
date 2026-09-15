@@ -1,0 +1,55 @@
+schema_version = "defuzex-bench.agent.v2"
+agent_id = "local-rag-researcher-deepseek"
+display_name = "13 local-rag-researcher-deepseek"
+framework = "langgraph"
+
+[evaluation]
+replay_safe = true
+
+[source]
+repository = "https://github.com/kaymen99/local-rag-researcher-deepseek"
+revision = "local-snapshot"
+downloaded_on = "2026-09-15"
+
+[runtime]
+type = "docker"
+execution = "oneshot"
+timeout_sec = 900
+secret_env_keys = ["TAVILY_API_KEY"]
+
+[build]
+context = "."
+dockerfile = "Dockerfile"
+
+[launch]
+argv = ["python", "-m", "agentbench.runtime.agentcontainer.worker"]
+workdir = "/run/agentbench-tools"
+
+[adapter]
+type = "langgraph"
+mode = "in_process"
+config = "abb-langgraph.json"
+graph_id = "agent"
+input_key = "message"
+binding = "agent_binding.py:create_graph"
+
+[observe]
+input_fields = [{name = "message", label = "Request", required = true}]
+
+[llm_interception]
+required = true
+trust_plugin = "pem-env"
+
+[[llm_interception.credentials]]
+id = "openai"
+agent_env = "OPENAI_API_KEY"
+auth_plugin = "bearer-token"
+
+[[llm_interception.routes]]
+id = "openai-chat"
+host_patterns = ["api.openai.com"]
+ports = [443]
+methods = ["POST"]
+path_patterns = ["/v1/chat/completions"]
+protocol_plugin = "openai-chat"
+credential = "openai"
