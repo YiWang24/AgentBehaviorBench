@@ -1,5 +1,6 @@
 """Protect persisted Suite and Attempt paths from default-history cleanup."""
 from contextlib import contextmanager
+import time
 from dataclasses import dataclass
 import hashlib
 import json
@@ -30,6 +31,26 @@ def _cache(project_root, *, create=False):
     return path
 
 
+GUARD_WAIT_ENV = 'ABB_SUITE_GUARD_WAIT'
+GUARD_WAIT_SECONDS = 60
+
+
+def _guard_wait_seconds(environ=None) -> float:
+    """How long to wait for the guard before giving up.
+
+    Overridable so a caller that genuinely wants to fail fast -- or a test asserting
+    that another process is excluded -- does not sit through the full wait.
+    """
+    raw = (os.environ if environ is None else environ).get(GUARD_WAIT_ENV)
+    if raw is None:
+        return GUARD_WAIT_SECONDS
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return GUARD_WAIT_SECONDS
+    return value if value >= 0 else GUARD_WAIT_SECONDS
+
+
 @contextmanager
 def history_guard(project_root):
     """Serialize fresh Suite publication against history moves, across processes.
@@ -41,10 +62,27 @@ def history_guard(project_root):
     if directory.is_symlink() or (directory / '.writer.lock').is_symlink():
         raise ValueError('History coordination lock must not be a symlink')
     lock = SuiteLock(directory)
-    try:
-        lock.acquire()
-    except SuiteLockedError as exc:
-        raise RuntimeError('History cleanup or Suite creation is already in progress; try again') from exc
+    wait_seconds = _guard_wait_seconds()
+    deadline = time.monotonic() + wait_seconds
+    delay = 0.05
+    while True:
+        try:
+            lock.acquire()
+            break
+        except SuiteLockedError as exc:
+            # By this function's own contract the guard is held only while a Suite is
+            # created or history is moved -- a short critical section, released before
+            # any work is dispatched. Concurrent evaluations therefore contend for a
+            # moment at startup, and refusing on contact turns that moment into a dead
+            # run: three simultaneous evaluations left two of them failed after 0.2s,
+            # told to "try again" by a message with nothing behind it. Wait for the
+            # holder instead, and only give up once waiting stops being plausible.
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    'History cleanup or Suite creation is still in progress after '
+                    f'{wait_seconds:g}s; try again') from exc
+            time.sleep(delay)
+            delay = min(delay * 2, 0.5)
     try:
         yield
     finally:

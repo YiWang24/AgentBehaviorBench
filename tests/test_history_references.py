@@ -125,11 +125,14 @@ def test_malformed_attempt_reference_metadata_fails_closed(tmp_path):
     assert run.exists()
 
 
-def test_creation_and_cleanup_guard_excludes_another_process(tmp_path):
+def test_creation_and_cleanup_guard_excludes_another_process(tmp_path, monkeypatch):
     program = (
         'import sys\nfrom agentbench.harness.session.references import history_guard\n'
         'try:\n with history_guard(sys.argv[1]): print("acquired")\n'
         'except RuntimeError: print("locked")\n')
+    # The guard now waits for the holder instead of refusing on contact, so the excluded
+    # process must be told not to wait out the full default before reporting exclusion.
+    monkeypatch.setenv('ABB_SUITE_GUARD_WAIT', '0.2')
     with history_guard(tmp_path):
         output = subprocess.check_output([sys.executable, '-c', program, str(tmp_path)], text=True)
         assert output.strip() == 'locked'
